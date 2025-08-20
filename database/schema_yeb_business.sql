@@ -1,0 +1,2 @@
+-- Deprecated old schema file. Consolidated schema now in schema_btms_db.sql
+-- Intentionally left blank.
