@@ -1,121 +1,130 @@
-Berikut adalah versi yang lebih rapi untuk file `README.md` yang Anda inginkan:
 
-```markdown
 # Business Trip Management System (BTMS)
 
-A PHP (native) + Bootstrap 5 application designed to manage business trips, approvals, and cash settlements with simple RBAC (Role-Based Access Control) and security hardening.
+A simple Business Trip Management System built using PHP (native) and Bootstrap 5 to handle business trips, approvals, and settlements with security hardening and role-based access control (RBAC).
 
-## Key Features
-- **Multi-database support**: Attempts to connect to `yeb_business`, falling back to local `btms_db`.
-- **Roles**: `admin`, `manager`, `employee` (role-based page whitelist in router).
-- **Employee & Master Data**: Includes department, group, and designation management.
-- **Trip Registration**: Supports trip registration, approval form (printable), and cancellation.
-- **Dynamic Approver Names**: Pulls approver names from `circular` table (DeptCode → Approval1..7).
-- **Temporary Payment**: Replaces old "Advance" system, supporting multiple currencies (IDR, SGD, YEN).
-- **Settlement Workflow**: Simplified settlement flow with automatic remaining/shortfall calculations.
-- **Auto Currency Conversion**: Converts between IDR, SGD, and YEN on settlement printout using original temporary payment ratios.
-- **Printable Documents**: Trip approval and settlement forms are printable via browser's Print → Save as PDF.
-- **File Uploads**: Allows for multiple receipt uploads (images/PDF) for settlement.
-- **Security**:
-  - Session regeneration
-  - Stricter cookie flags (HttpOnly, SameSite=Strict)
-  - Login throttling
-  - CSRF tokens
-  - Security headers (CSP, X-Frame-Options, etc.)
-  - Sanitized page routing
+## Installation on Laragon
 
-## Current Settlement Flow (Simplified)
-1. **Trip Approval**: Trip is approved.
-2. **Access Approved Trips**: In the "Approved Trips & Settlements" list, click (+) on a trip without settlement.
-3. **Settlement Modal**: Displays the following:
-    - Temporary amount (read-only)
-    - Used input (Terpakai)
-    - Remaining amount (Temporary - Terpakai) auto-calculated
-4. **File Attachments**: Optionally attach receipt files.
-5. **Settlement Submission**: 
-    - Submit to create a settlement record (status = submitted).
-    - Variance logic:
-        - `variance = used - temporary`
-        - If variance < 0: Return To Acct (employee returns cash)
-        - If variance > 0: Pay To Employee
-6. **PDF Generation**: Open PDF to print. Totals auto-converted to SGD/YEN if temporary payment had foreign currencies.
+To install the BTMS on your local environment using **Laragon**, follow these steps:
 
-## Folder Structure
 ```
 
-config/    # DB config & connection bootstrap
-lib/       # auth, guard, helpers (security headers, CSRF, etc.)
-public/    # index.php (router), pages/, assets (CDN loaded)
+1. **Clone or Download the Project**
+   - Clone the repository or download https://github.com/hfzrfa/btms_yeb.git
 
-````
+2. **Set up Databases**
+   - Open **phpMyAdmin** from Laragon or use your MySQL command-line tool.
+   - Create a new database (e.g., `btms_db`), and import the initial schema if available.
+   - Alternatively, if the database is provided, you can import it via `phpMyAdmin` or a MySQL client.
 
-## Installation
-1. Clone or copy the application into your web root (e.g., `c:/laragon/www/btms`).
-2. Create the databases and import the initial schema (if available).
-3. Configure credentials in `config/config.php`.
-4. Browse to: `http://localhost/btms/public/`.
+3. **Configure Database Credentials**
+   - Open `config/config.php`.
+   - Set the database credentials for your environment:
+     ```php
+     define('DB_HOST', 'localhost');
+     define('DB_USER', 'root');
+     define('DB_PASS', '');
+     define('DB_NAME', 'btms_db');  // Or 'yeb_business' if applicable
+     ```
 
-## Authentication & Passwords
-Passwords are stored using PHP’s `password_hash`. To migrate legacy hashes, run the following update query per user:
-```sql
-UPDATE users SET password = '<new_hash_from_password_hash>' WHERE id = X;
-````
+4. **Access the Application**
+   - Open your browser and go to `http://localhost/btms/public/` to access the BTMS application.
 
-Upon login, the system will rehash passwords if the algorithm requires upgrading.
+5. **Set up Permissions and Roles**
+   - Default roles are `admin`, `manager`, and `employee`. Ensure you set up users in the database with appropriate roles.
+
+6. **Log In**
+   - The default admin user can log in with a pre-configured username and password, or you can create new users via the database.
+```
+
+## Features
+
+### 1. **Multi-database Support**
+   - The system attempts to use the `yeb_business` database, falling back to the local `btms_db`.
+
+### 2. **Roles**
+   - The system has role-based access control (RBAC) with three roles:
+     - `admin`
+     - `manager`
+     - `employee`
+   - Role-based page whitelisting in the router ensures each role only has access to appropriate pages.
+
+### 3. **Employee and Master Data Management**
+   - Manage employee data, including department, group, and designation.
+
+### 4. **Trip Registration and Approval**
+   - Register trips, submit approval forms, and manage trip cancellations.
+   - Printable trip approval forms are available for each trip.
+
+### 5. **Dynamic Approver Names**
+   - Approver names are dynamically pulled from the `circular` table (DeptCode → Approval1..7), streamlining the approval process.
+
+### 6. **Temporary Payment Management**
+   - Supports multi-currency payments (IDR, SGD, YEN).
+   - The Temporary Payment feature replaces the old "Advance" system, offering better flexibility with currency management.
+
+### 7. **Simplified Settlement Workflow**
+   - Users can enter the amount used, and the system auto-calculates the remaining or shortfall of temporary payments.
+   - Payments to employees or returns to accounts are automatically calculated based on variance logic.
+
+### 8. **Auto Currency Conversion**
+   - The system auto-converts settlement totals between IDR, SGD, and YEN based on the original temporary payment ratios.
+
+### 9. **Printable Documents**
+   - Trip approval and settlement forms can be printed or saved as PDF using the browser’s Print dialog (Ctrl+P).
+   - The settlement printout is auto-converted to SGD/YEN if applicable.
+
+### 10. **File Uploads**
+   - Attach multiple receipt files (images or PDFs) for settlement verification.
+
+### 11. **Security Features**
+   - **Session Security**: Regenerates sessions on login and uses strict cookie flags (HttpOnly, SameSite=Strict).
+   - **Login Throttling**: Limits login attempts to prevent brute force attacks.
+   - **CSRF Protection**: Uses CSRF tokens for modifying forms.
+   - **Security Headers**: Includes Content Security Policy (CSP), X-Frame-Options, and other headers.
+   - **Sanitized Routing**: Ensures page parameters are sanitized to prevent security vulnerabilities.
+
+### 12. **Auto Schema Extension**
+   - The system automatically extends the database schema during runtime, adding missing columns or tables for backward compatibility.
 
 ## Printing PDFs
 
-We output pure HTML (no binary PDF library) to keep deployment light. Use the browser’s Print dialog (Ctrl+P) and save as PDF. A real PDF engine (like Dompdf/mPDF) can be added later.
-
-## Security Hardening Summary
-
-| Area         | Measures                                                      |
-| ------------ | ------------------------------------------------------------- |
-| **Sessions** | ID regeneration on login, strict cookie flags                 |
-| **Login**    | Throttling (delay / attempt limiting)                         |
-| **Routing**  | Whitelisted pages by role, sanitized `page` param             |
-| **CSRF**     | Token helper on modifying forms                               |
-| **Output**   | `esc()` helper for HTML contexts                              |
-| **Headers**  | CSP, X-Frame-Options, X-Content-Type-Options, Referrer-Policy |
+We output pure HTML to keep the system lightweight and use the browser’s Print dialog (Ctrl+P) → Save as PDF for document generation. If needed, you can later integrate a dedicated PDF library like **Dompdf** or **mPDF** for real PDF generation.
 
 ## Auto Currency Conversion Logic
 
-When a trip has temporary payments in IDR + (SGD and/or YEN), the conversion rates are inferred as follows:
+- The system automatically converts between IDR, SGD, and YEN. The conversion rates are inferred based on the temporary payment amount:
 
-```
-rate_sgd = temp_payment_idr / temp_payment_sgn
-rate_yen = temp_payment_idr / temp_payment_yen
-```
+rate\_sgd = temp\_payment\_idr / temp\_payment\_sgn
+rate\_yen = temp\_payment\_idr / temp\_payment\_yen
 
-Settlement totals are divided by these rates to display SGD / YEN equivalents. If no foreign temporary amount exists, the column will show `-`.
 
-## Database Auto-Migrations (Lightweight)
+## Security Hardening Summary
 
-The application will attempt `ALTER TABLE` to add new settlement columns (`variance`, `status`, `remaining_cash`, `settlement_date`) and create the `settlement_items` table if missing. This helps keep older installations working without manual SQL. However, for production, you should formalize migrations.
+| Area        | Measures                                                        |
+|-------------|-----------------------------------------------------------------|
+| **Sessions**| ID regeneration on login, strict cookie flags                   |
+| **Login**   | Throttling (delay / attempt limiting)                            |
+| **Routing** | Whitelisted pages by role, sanitized `page` param                |
+| **CSRF**    | Token helper on modifying forms                                 |
+| **Output**  | `esc()` helper for HTML contexts                                 |
+| **Headers** | CSP, X-Frame-Options, X-Content-Type-Options, Referrer-Policy   |
 
 ## Roadmap / Potential Enhancements
 
-* Settlement approval (manager/finance) and digital signatures.
-* True PDF generation (Dompdf/mPDF) + QR code or hash footer.
-* Editable settlements and audit trail.
-* Pagination/server-side filtering for large datasets.
-* Per-field validation messages & stronger input filtering.
-* Comprehensive logging and auditing (DB or file).
-* Unit/feature tests + Continuous Integration (CI).
-* Docker/Compose for reproducible environments.
-* Multi-currency line items (current simplified mode uses only IDR but converts the summary).
+- Settlement approval (manager/finance) and digital signatures.
+- Real PDF generation (Dompdf/mPDF) with QR code or hash footer.
+- Editable settlements with audit trail.
+- Pagination/server-side filtering for large datasets.
+- Enhanced input validation and stronger filtering.
+- Comprehensive logging and auditing (DB or file).
+- Unit/feature tests with Continuous Integration (CI).
+- Docker/Compose for reproducible development environments.
+- Multi-currency line items (currently only IDR is converted).
 
 ## Developer Notes
 
-* Do not rely on runtime `ALTER TABLE` in strict environments; port those statements to migration scripts.
-* For added pages, register them in the router whitelist to enforce RBAC.
-* To switch back to detailed settlement line items, restore the previous modal/table logic and populate `settlement_items`.
+- Avoid relying on runtime `ALTER TABLE` in strict environments; instead, port those statements to migration scripts.
+- Add new pages by registering them in the router whitelist to enforce RBAC.
+- If switching back to detailed settlement line items, restore the previous modal/table logic and populate `settlement_items`.
 
----
-
-Enjoy & adapt as needed.
-
-```
-
-Dengan format ini, `README.md` Anda akan lebih terstruktur dan mudah dibaca, sesuai dengan pedoman standar dokumentasi proyek perangkat lunak. Anda bisa langsung menggunakan format ini di repo GitHub atau sebagai dokumentasi lainnya.
-```
