@@ -73,7 +73,14 @@ if ($user['role'] === 'employee') {
           </td>
           <td class="text-nowrap">
             <?php if (!$settled): ?>
-              <button class="btn btn-sm btn-primary" data-trip='<?= json_encode(['id' => $t['id'], 'advance' => $t['temp_payment_idr'], 'tujuan' => $t['tujuan'], 'period' => ($t['period_from'] ?? '') . ' - ' . ($t['period_to'] ?? '')]) ?>' onclick="openSettlement(this)"><i class="fas fa-plus-circle"></i></button>
+              <button class="btn btn-sm btn-primary" data-trip='<?= json_encode([
+                'id' => $t['id'],
+                'advance' => (float)$t['temp_payment_idr'],
+                'advance_sgd' => (float)($t['temp_payment_sgn'] ?? 0),
+                'advance_yen' => (float)($t['temp_payment_yen'] ?? 0),
+                'tujuan' => $t['tujuan'],
+                'period' => ($t['period_from'] ?? '') . ' - ' . ($t['period_to'] ?? '')
+              ]) ?>' onclick="openSettlement(this)"><i class="fas fa-plus-circle"></i></button>
             <?php else: ?>
               <a class="btn btn-sm btn-outline-secondary" target="_blank" href="index.php?page=settlements/pdf&id=<?= $t['settlement_id'] ?>" title="Print PDF"><i class="fas fa-file-pdf"></i></a>
             <?php endif; ?>
@@ -100,18 +107,59 @@ if ($user['role'] === 'employee') {
         <div class="modal-body">
           <div class="mb-3 small text-muted" id="mTripInfo"></div>
           <div class="row g-2 mb-3">
-            <div class="col-md-4">
+            <div class="col-md-3">
               <label class="form-label">Temporary (IDR)</label>
               <input class="form-control" id="mAdvanceDisp" readonly>
             </div>
-            <div class="col-md-4">
-              <label class="form-label">Used (IDR)</label>
-              <input class="form-control" name="used_amount" id="mUsedAmount" type="number" min="0" step="0.01" placeholder="0">
+            <div class="col-md-3">
+              <label class="form-label">Total (IDR)</label>
+              <input class="form-control" id="mTotalIdr" readonly>
             </div>
-            <div class="col-md-4">
-                <label class="form-label">Remaining (IDR)</label>
-              <input class="form-control" id="mDiffDisp" readonly>
+            <div class="col-md-3">
+              <label class="form-label">Return To Acc</label>
+              <input class="form-control" id="mReturnAcc" readonly>
             </div>
+            <div class="col-md-3">
+              <label class="form-label">Pay To Employee</label>
+              <input class="form-control" id="mPayEmp" readonly>
+            </div>
+          </div>
+          <div class="table-responsive mb-3">
+            <table class="table table-sm table-bordered align-middle" id="mExpTbl" style="min-width:760px;">
+              <thead class="table-light">
+                <tr class="text-center align-middle">
+                  <th style="width:200px;">Type Of Expenses</th>
+                  <th style="width:140px;">IDR</th>
+                  <th style="width:120px;">SGD ($)</th>
+                  <th style="width:120px;">YEN (¥)</th>
+                </tr>
+              </thead>
+              <tbody id="mExpBody"></tbody>
+              <tfoot>
+                <tr class="fw-semibold">
+                  <td>Total Business Trip Expenses</td>
+                  <td class="text-end" id="mTotalIdrCell">0</td>
+                  <td class="text-end" id="mTotalSgdCell">0</td>
+                  <td class="text-end" id="mTotalYenCell">0</td>
+                </tr>
+                <tr>
+                  <td>Temporary Payment</td>
+                  <td class="text-end" id="mAdvIdrCell">0</td>
+                  <td class="text-end" id="mAdvSgdCell">-</td>
+                  <td class="text-end" id="mAdvYenCell">-</td>
+                </tr>
+                <tr>
+                  <td class="text-center">Return To ACC</td>
+                  <td class="text-end" id="mReturnAccCell">0</td>
+                  <td></td><td></td>
+                </tr>
+                <tr>
+                  <td class="text-center">Pay To Employee</td>
+                  <td class="text-end" id="mPayEmpCell">0</td>
+                  <td></td><td></td>
+                </tr>
+              </tfoot>
+            </table>
           </div>
           <div class="mb-3">
             <label class="form-label">Receipts</label>
@@ -136,8 +184,10 @@ if ($user['role'] === 'employee') {
     document.getElementById('mAdvanceHidden').value = data.advance;
     document.getElementById('mAdvanceDisp').value = fmt(data.advance);
     document.getElementById('mTripInfo').innerHTML = `<strong>${escapeHtml(data.tujuan||'Trip')}</strong> <span class="text-muted">(${escapeHtml(data.period||'')})</span>`;
-  resetItems();
-  calcSimple();
+  document.getElementById('mAdvSgdCell').textContent = data.advance_sgd?Number(data.advance_sgd).toFixed(2):'-';
+  document.getElementById('mAdvYenCell').textContent = data.advance_yen?fmt(data.advance_yen):'-';
+    resetItems();
+    if (typeof calcExp === 'function') { calcExp(); }
   m.show();
   }
 
@@ -154,14 +204,62 @@ if ($user['role'] === 'employee') {
       "'": "&#39;"
     } [s]));
   }
-  function resetItems(){ /* simplified mode */ document.getElementById('mItemsJson').value='[]'; }
-  function calcSimple(){
-    const adv = Number(document.getElementById('mAdvanceHidden').value||0);
-    const used = Number(document.getElementById('mUsedAmount').value||0);
-    const diff = adv - used;
-    document.getElementById('mDiffDisp').value = fmt(diff);
+  const EXP_CATEGORIES = [
+    'Airplane','Train','Ferry / Speed','Bus','Taxi 1','Taxi 2','Taxi 3','Taxi 4','Taxi 5',
+    'Other','Daily Allowance','Accommodation'
+  ];
+  function resetItems(){
+    const body = document.getElementById('mExpBody');
+    body.innerHTML='';
+    EXP_CATEGORIES.forEach(cat=>{
+      const tr=document.createElement('tr');
+      tr.innerHTML=`<td>${cat}</td>
+        <td><input type="number" min="0" step="0.01" class="form-control form-control-sm exp-idr" data-cat="${cat}"></td>
+        <td><input type="number" min="0" step="0.01" class="form-control form-control-sm exp-sgd" data-cat="${cat}"></td>
+        <td><input type="number" min="0" step="0.01" class="form-control form-control-sm exp-yen" data-cat="${cat}"></td>`;
+      body.appendChild(tr);
+    });
+    body.querySelectorAll('input').forEach(i=>i.addEventListener('input', calcExp));
+    calcExp();
   }
-  document.getElementById('mUsedAmount').addEventListener('input', calcSimple);
+  function calcExp(){
+    const adv = Number(document.getElementById('mAdvanceHidden').value||0);
+    // derive implicit rates from advance composition present in data attribute saved earlier
+    const advBtn = document.querySelector('button[data-trip][data-bs-target]');
+    // We'll cache rates globally after openSettlement sets advance_sgd/yen cells
+    const advSgdCell = document.getElementById('mAdvSgdCell').textContent;
+    const advYenCell = document.getElementById('mAdvYenCell').textContent;
+    const advSgd = parseFloat(advSgdCell.replace(/[^0-9.]/g,''))||0;
+    const advYen = parseFloat(advYenCell.replace(/[^0-9.]/g,''))||0;
+    const rateSgd = (advSgd>0 && adv>0)? (adv/advSgd):0;
+    const rateYen = (advYen>0 && adv>0)? (adv/advYen):0;
+    let sumIdrInput=0,sumSgd=0,sumYen=0; const items=[];
+    document.querySelectorAll('#mExpBody tr').forEach(tr=>{
+      const cat=tr.cells[0].textContent.trim();
+      const idr=parseFloat(tr.querySelector('.exp-idr').value)||0;
+      const sgd=parseFloat(tr.querySelector('.exp-sgd').value)||0;
+      const yen=parseFloat(tr.querySelector('.exp-yen').value)||0;
+      if(idr||sgd||yen){ items.push({category:cat,amount_idr:idr,amount_sgd:sgd,amount_yen:yen}); }
+      sumIdrInput+=idr; sumSgd+=sgd; sumYen+=yen;
+    });
+    const converted = (rateSgd>0?sumSgd*rateSgd:0) + (rateYen>0?sumYen*rateYen:0);
+    const totalIdr = sumIdrInput + converted;
+    document.getElementById('mTotalIdrCell').textContent=fmt(totalIdr);
+    document.getElementById('mTotalSgdCell').textContent=sumSgd?sumSgd.toFixed(2):'0';
+    document.getElementById('mTotalYenCell').textContent=sumYen?fmt(sumYen):'0';
+    document.getElementById('mTotalIdr').value=fmt(totalIdr);
+    document.getElementById('mItemsJson').value=JSON.stringify(items);
+    document.getElementById('mAdvIdrCell').textContent=fmt(adv);
+  // Return To ACC = Temporary - Total (if positive)
+  const returnAcc = adv>totalIdr ? (adv-totalIdr) : 0;
+  // Pay To Employee shows total used (as per user request)
+  const payEmp = totalIdr;
+  document.getElementById('mReturnAccCell').textContent= returnAcc?fmt(returnAcc):'0';
+  document.getElementById('mPayEmpCell').textContent= fmt(payEmp);
+  document.getElementById('mReturnAcc').value= returnAcc?fmt(returnAcc):'0';
+  document.getElementById('mPayEmp').value= fmt(payEmp);
+  }
+  // listeners removed (no manual rate inputs)
   document.getElementById('settleSearch').addEventListener('input', e => {
     const q = e.target.value.toLowerCase();
     document.querySelectorAll('#settleTable tbody tr').forEach(tr => {

@@ -357,3 +357,357 @@ if ($user['role'] === 'employee' && $trip['employee_id'] != $user['employee_id']
     </script>
 </body>
 </html>
+
+    <!-- Temporary Payment Block (separate table for precise layout) -->
+    <table style="margin-top:4px;">
+        <tr class="shade small center">
+            <td style="width:110px;" rowspan="5">Temporary Payment</td>
+            <td style="width:130px;" rowspan="4" class="shade">Amount Of Application</td>
+            <td style="width:60px;" class="shade">IDR</td>
+            <td style="width:220px;"><?= $trip['temp_payment_idr'] ? number_format($trip['temp_payment_idr'], 0, ',', '.') : '&nbsp' ?></td>
+            <td style="width:200px;" rowspan="1" class="shade">Receiver</td>
+            <td style="width:150px;" rowspan="1" colspan="1" class="shade">Signature</td>
+        </tr>
+        <tr>
+            <td class="shade center small">SGD</td>
+            <td>&nbsp;<?= $hasSGD ? number_format($trip['temp_payment_sgn'], 2) : '' ?></td>
+        </tr>
+        <tr>
+            <td class="shade center small">YEN</td>
+            <td>&nbsp;<?= $hasYEN ? number_format($trip['temp_payment_yen'], 0, ',', '.') : '' ?></td>
+        </tr>
+
+        <tr>
+            <td class="shade center small">&nbsp</td>
+            <td></td>
+        </tr>
+        <tr>
+            <td class="shade" rowspan="2" colspan="2"></td>
+        </tr>
+        <tr>
+            <td class="small">Date Of Collection</td>
+            <td></td>
+            <td></td>
+            <td></td>
+        </tr>
+    </table>
+
+    
+
+
+
+    <?php
+// Check if user is logged in and has appropriate role
+$user = current_user();
+if (!$user || !in_array($user['role'], ['admin', 'manager', 'employee'])) {
+    redirect('index.php?page=login');
+    return;
+}
+
+$id = (int)($_GET['id'] ?? 0);
+if (!$id) {
+    redirect('index.php?page=trips/index');
+    return;
+}
+
+$pdo = getPDO();
+
+// Get trip details with employee information
+$stmt = $pdo->prepare("
+    SELECT t.*, 
+           COALESCE(t.emp_name, e.Name) as employee_name,
+           COALESCE(t.emp_no, e.EmpNo) as employee_empno,
+           e.DeptCode, e.ClasCode, e.DestCode, e.Sex, e.GrpCode
+    FROM trips t 
+    LEFT JOIN employees e ON e.id = t.employee_id 
+    WHERE t.id = ?
+");
+$stmt->execute([$id]);
+$trip = $stmt->fetch(PDO::FETCH_ASSOC);
+
+if (!$trip) {
+    redirect('index.php?page=trips/index');
+    return;
+}
+
+// Only allow PDF generation for approved trips
+if ($trip['status'] !== 'approved') {
+    redirect('index.php?page=trips/index');
+    return;
+}
+
+// Get current user for permission check
+$user = current_user();
+if ($user['role'] === 'employee' && $trip['employee_id'] != $user['employee_id']) {
+    redirect('index.php?page=trips/index');
+    return;
+}
+
+?>
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Approval Of Business Trip - <?= esc($trip['employee_empno']) ?></title>
+    <style>
+        @media print {
+            body {
+                margin: 10px;
+            }
+
+            .no-print {
+                display: none !important;
+            }
+        }
+
+        body {
+            font-family: Arial, Helvetica, sans-serif;
+            font-size: 11px;
+            line-height: 1.25;
+            margin: 15px;
+            color: #000;
+        }
+
+        .btn-print {
+            position: fixed;
+            top: 10px;
+            right: 10px;
+            background: #222;
+            color: #fff;
+            border: 0;
+            padding: 6px 14px;
+            font-size: 12px;
+            cursor: pointer;
+            border-radius: 3px;
+        }
+
+        .btn-print:hover {
+            background: #000;
+        }
+
+        table {
+            border-collapse: collapse;
+            width: 100%;
+        }
+
+        .tbl th,
+        .tbl td {
+            border: 1px solid #000;
+            padding: 4px 6px;
+            vertical-align: top;
+        }
+
+        .center {
+            text-align: center;
+        }
+
+        .small {
+            font-size: 10px;
+        }
+
+        .title-row td {
+            font-weight: bold;
+            font-size: 13px;
+        }
+
+        .nobr {
+            white-space: nowrap;
+        }
+
+        .h-blank {
+            height: 34px;
+        }
+
+        .signature-box {
+            height: 42px;
+        }
+
+        .amount-cell {
+            width: 90px;
+        }
+
+        .currency-col {
+            width: 150px;
+        }
+
+        .id-box {
+            font-weight: bold;
+            text-align: center;
+        }
+
+        .top-meta td {
+            font-size: 11px;
+        }
+    </style>
+</head>
+
+<body>
+    <button class="btn-print no-print" onclick="window.print()">Print</button>
+    <?php
+    // Dynamic approver names based on circular table (DeptCode -> Approval1..7)
+    $approvers = [];
+    if (!empty($trip['DeptCode'])) {
+        try {
+            $cstmt = $pdo->prepare("SELECT Approval1,Approval2,Approval3,Approval4,Approval5,Approval6,Approval7 FROM circular WHERE DeptCode = ? LIMIT 1");
+            $cstmt->execute([$trip['DeptCode']]);
+            if ($row = $cstmt->fetch(PDO::FETCH_ASSOC)) {
+                foreach ($row as $val) {
+                    $val = trim((string)$val);
+                    if ($val !== '') $approvers[] = $val; // only non-empty
+                }
+            }
+        } catch (Exception $e) { /* ignore and fallback */
+        }
+    }
+    // Fallback if none found
+    if (empty($approvers)) {
+        $approvers = ['Approval 1', 'Approval 2', 'Approval 3', 'Approval 4', 'Approval 5', 'Approval 6', 'Approval 7'];
+    }
+    // Normalize to fixed 5 columns minimum (match sample form) for stable layout
+    while (count($approvers) < 5) {
+        $approvers[] = '';
+    }
+    $apprCount = count($approvers); // used for colspan math
+    // proposal date parts
+    $proposalDate = strtotime($trip['created_at']);
+    $d = $proposalDate ? date('d', $proposalDate) : '';
+    $m = $proposalDate ? date('m', $proposalDate) : '';
+    $y = $proposalDate ? date('Y', $proposalDate) : '';
+    // currency availability
+    $hasSGD = isset($trip['temp_payment_sgn']) && is_numeric($trip['temp_payment_sgn']) && (float)$trip['temp_payment_sgn'] > 0;
+    $hasYEN = isset($trip['temp_payment_yen']) && is_numeric($trip['temp_payment_yen']) && (float)$trip['temp_payment_yen'] > 0;
+    ?>
+    <table class="tbl top-meta" style="margin-bottom:6px;">
+        <tr>
+            <td style="width:40%;" class="center">PT.Yoshikawa Electronics Bintan</td>
+            <td style="width:20%;" class="center">YBR-HR065</td>
+            <td style="width:20%;" class="center">Initial</td>
+        </tr>
+    </table>
+    <table class="tbl" style="margin-bottom:8px;">
+        <tr class="title-row">
+            <td class="center">PT.Yoshikawa Electronics Bintan Approval Of Business Trip</td>
+        </tr>
+    </table>
+
+    <?php
+    // Derive registration number (use existing field if present, else build one)
+    $regNo = '';
+    if (!empty($trip['registration_no'])) {
+        $regNo = $trip['registration_no'];
+    } else {
+        $created = !empty($trip['created_at']) ? strtotime($trip['created_at']) : time();
+        $regNo = 'BT-' . str_pad((string)$trip['id'], 5, '0', STR_PAD_LEFT) . '/' . date('Y', $created);
+    }
+    ?>
+    <table class="tbl" style="margin-bottom:8px;">
+        <tr>
+            <th style="width:160px;">Registration Number</th>
+            <td></td>
+            <th style="width:120px;">ID</th>
+            <td class="id-box"><?= esc($trip['id']) ?></td>
+        </tr>
+    </table>
+
+    <table class="tbl small">
+        <tr>
+            <td colspan="2" style="width:75px;" class="center">Proposal Date</td>
+            <td colspan="2" style="width:75px;" class="center">
+                <?= ($d && $m && $y) ? esc($d . '/' . $m . '/' . $y) : '' ?>
+            </td>
+
+            <td style="width:55px; background:#e0e0e0;" class="center">NIK</td>
+            <td style="width:55px;" class="center"><?= esc($trip['employee_empno']) ?></td>
+
+            <td style="width:80px; background:#e0e0e0;" class="center">Name</td>
+            <td style="width:80px;" class="center"><?= esc($trip['employee_name']) ?></td>
+
+                        
+            <td style="width:80px; background:#e0e0e0;" class="center">Signature</td>
+            <td colspan="<?= $apprCount + 4 ?>">&nbsp;</td>
+
+        </tr>
+        <tr>
+            <td class="center" colspan="2" rowspan="2">Approval</td>
+            <?php foreach ($approvers as $a): ?>
+                <td class="center" style="width:95px;"><?= esc($a) ?></td>
+            <?php endforeach; ?>
+
+        </tr>
+
+        <tr>
+            <?php foreach ($approvers as $a): ?>
+                <td class="signature-box"></td>
+            <?php endforeach; ?>
+            <td class="signature-box"></td>
+
+
+        <tr>
+            <td colspan="2">Department / Section</td>
+            <td colspan="<?= (3 + $apprCount + 2) ?>"><?= esc($trip['DeptCode'] ?: '-') ?></td>
+        </tr>
+        <tr>
+            <td colspan="2">Destination</td>
+            <td colspan="<?= (3 + $apprCount + 2) ?>"><?= esc($trip['tujuan']) ?><?= $trip['destination_company'] ? ' / ' . esc($trip['destination_company']) : '' ?></td>
+        </tr>
+        <tr>
+            <td colspan="2">Purpose</td>
+            <td colspan="<?= (3 + $apprCount + 2) ?>"><?= esc($trip['purpose'] ?: '-') ?></td>
+        </tr>
+        <tr>
+            <td rowspan="2" colspan="1">Period</td>
+            <td class="center" style="width:50px;">From</td>
+            <td class="center" style="width:70px;"><?= $trip['period_from'] ? date('d/m/Y', strtotime($trip['period_from'])) : '' ?></td>
+            <td class="center" style="width:30px;">To</td>
+            <td class="center" style="width:70px;"><?= $trip['period_to'] ? date('d/m/Y', strtotime($trip['period_to'])) : '' ?></td>
+            <td colspan="<?= ($apprCount + 2) ?>"></td>
+        </tr>
+        <tr>
+
+        </tr>
+
+        <!-- Temporary Payment -->
+        <?php
+        // total columns already = 7 + $apprCount (see earlier explanation)
+        ?>
+        <tr>
+            <td rowspan="5" colspan="2" class="center">Temporary Payment</td>
+            <td rowspan="4" class="center">Amount Of<br>Application</td>
+
+            <td class="center currency-col">IDR</td>
+            <td class="center amount-cell" colspan="2">
+                <?= $trip['temp_payment_idr'] ? number_format($trip['temp_payment_idr'], 0, ',', '.') : '-' ?>
+            </td>
+
+            <td class="center" rowspan="4" colspan="6">Receiver</td>
+            <td class="center" rowspan="4" colspan="4">Signature</td>
+
+        </tr>
+        <tr>
+            <td class="center currency-col">SGD</td>
+            <td class="center amount-cell" colspan="2">
+                <?= $hasSGD ? number_format($trip['temp_payment_sgn'], 2) : '-' ?>
+            </td>
+        </tr>
+        <tr>
+            <td class="center currency-col">YEN</td>
+            <td class="center amount-cell" colspan="2">
+                <?= $hasYEN ? number_format($trip['temp_payment_yen'], 0, ',', '.') : '-' ?>
+            </td>
+        </tr>
+        <tr>
+            <td class="center currency-col" >&nbsp;</td>
+            <td class="center amount-cell" colspan="2">&nbsp;</td>
+        </tr>
+        <tr>
+            <td colspan="2" class="small">Date Of Collection</td>
+            <td colspan="<?= $apprCount + 4 ?>">&nbsp;</td>
+        </tr>
+
+
+    </table>
+</body>
+
+</html>

@@ -35,17 +35,43 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && verify_csrf()) {
         $fileNames[] = $fn;
       }
     }
-    try { $pdo->exec("ALTER TABLE settlements ADD COLUMN remaining_cash DECIMAL(14,2) DEFAULT 0"); } catch (Exception $e) {}
+    try {
+      $pdo->exec("ALTER TABLE settlements ADD COLUMN remaining_cash DECIMAL(14,2) DEFAULT 0");
+    } catch (Exception $e) {
+    }
     $pdo->prepare('INSERT INTO settlements(trip_id,total_realisasi,bukti_file,variance,status,remaining_cash,created_at) VALUES(?,?,?,?,?,?,NOW())')
-        ->execute([$trip_id, $total_idr, implode('|', $fileNames), $variance, 'submitted', $remaining_cash]);
+      ->execute([$trip_id, $total_idr, implode('|', $fileNames), $variance, 'submitted', $remaining_cash]);
     redirect('index.php?page=settlements/index');
   }
-  // Legacy detailed mode fallback (if used_amount not sent)
+  // Detailed / modal mode (multi-currency capable)
   $items = json_decode(post('items_json') ?? '[]', true) ?: [];
-  $remaining_cash = (float)post('remaining_cash');
+  // Fetch trip currencies to derive implicit rates (IDR per foreign)
+  $trip = $pdo->prepare('SELECT temp_payment_idr,temp_payment_sgn,temp_payment_yen FROM trips WHERE id=?');
+  $trip->execute([$trip_id]);
+  $tripRow = $trip->fetch(PDO::FETCH_ASSOC) ?: ['temp_payment_idr' => 0, 'temp_payment_sgn' => 0, 'temp_payment_yen' => 0];
+  $adv_idr_full = (float)($tripRow['temp_payment_idr'] ?? 0);
+  $adv_sgd_full = (float)($tripRow['temp_payment_sgn'] ?? 0);
+  $adv_yen_full = (float)($tripRow['temp_payment_yen'] ?? 0);
+  $rate_sgd = ($adv_idr_full > 0 && $adv_sgd_full > 0) ? ($adv_idr_full / $adv_sgd_full) : 0;
+  $rate_yen = ($adv_idr_full > 0 && $adv_yen_full > 0) ? ($adv_idr_full / $adv_yen_full) : 0;
   $total_idr = 0;
-  foreach ($items as $it) { $total_idr += (float)($it['amount_idr'] ?? 0); }
+  $sumInputIdr = 0;
+  $sumSgd = 0;
+  $sumYen = 0;
+  foreach ($items as &$it) {
+    $idr = (float)($it['amount_idr'] ?? 0);
+    $sgd = (float)($it['amount_sgd'] ?? 0);
+    $yen = (float)($it['amount_yen'] ?? 0);
+    $sumInputIdr += $idr;
+    $sumSgd += $sgd;
+    $sumYen += $yen;
+    $total_idr += $idr + ($rate_sgd > 0 ? $sgd * $rate_sgd : 0) + ($rate_yen > 0 ? $yen * $rate_yen : 0);
+  }
+  unset($it);
+  // Variance kept for legacy purposes (difference vs advance IDR only)
   $variance = $total_idr - $advance_idr;
+  // Remaining cash = advance - total (if positive)
+  $remaining_cash = $advance_idr > $total_idr ? ($advance_idr - $total_idr) : 0;
   $fileNames = [];
   if (!empty($_FILES['receipts']['name'][0])) {
     foreach ($_FILES['receipts']['name'] as $i => $n) {
@@ -57,13 +83,26 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && verify_csrf()) {
       $fileNames[] = $fn;
     }
   }
-  try { $pdo->exec("ALTER TABLE settlements ADD COLUMN remaining_cash DECIMAL(14,2) DEFAULT 0"); } catch (Exception $e) {}
+  try {
+    $pdo->exec("ALTER TABLE settlements ADD COLUMN remaining_cash DECIMAL(14,2) DEFAULT 0");
+  } catch (Exception $e) {
+  }
   $pdo->prepare('INSERT INTO settlements(trip_id,total_realisasi,bukti_file,variance,status,remaining_cash,created_at) VALUES(?,?,?,?,?,?,NOW())')
-      ->execute([$trip_id, $total_idr, implode('|', $fileNames), $variance, 'submitted', $remaining_cash]);
-  try { $pdo->exec("CREATE TABLE IF NOT EXISTS settlement_items (id INT AUTO_INCREMENT PRIMARY KEY, settlement_id INT, category VARCHAR(50), description VARCHAR(255), amount_idr DECIMAL(15,2), created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP)"); } catch (Exception $e) {}
+    ->execute([$trip_id, $total_idr, implode('|', $fileNames), $variance, 'submitted', $remaining_cash]);
+  try {
+    $pdo->exec("CREATE TABLE IF NOT EXISTS settlement_items (id INT AUTO_INCREMENT PRIMARY KEY, settlement_id INT, category VARCHAR(50), description VARCHAR(255), amount_idr DECIMAL(15,2), amount_sgd DECIMAL(15,2) NULL, amount_yen DECIMAL(15,2) NULL, created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP)");
+  } catch (Exception $e) {
+  }
+  // Ensure new columns exist (idempotent)
+  try {
+    $pdo->exec('ALTER TABLE settlement_items ADD COLUMN amount_sgd DECIMAL(15,2) NULL, ADD COLUMN amount_yen DECIMAL(15,2) NULL');
+  } catch (Exception $e) {
+  }
   $settleId = (int)$pdo->lastInsertId();
-  $ins = $pdo->prepare('INSERT INTO settlement_items(settlement_id,category,description,amount_idr) VALUES (?,?,?,?)');
-  foreach ($items as $it) { $ins->execute([$settleId, $it['category'] ?? '', substr($it['description'] ?? '', 0, 255), (float)($it['amount_idr'] ?? 0)]); }
+  $ins = $pdo->prepare('INSERT INTO settlement_items(settlement_id,category,description,amount_idr,amount_sgd,amount_yen) VALUES (?,?,?,?,?,?)');
+  foreach ($items as $it) {
+    $ins->execute([$settleId, $it['category'] ?? '', substr($it['description'] ?? '', 0, 255), (float)($it['amount_idr'] ?? 0), (float)($it['amount_sgd'] ?? 0), (float)($it['amount_yen'] ?? 0)]);
+  }
   redirect('index.php?page=settlements/index');
 }
 ?>
