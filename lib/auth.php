@@ -17,6 +17,31 @@ if (session_status() === PHP_SESSION_NONE) {
 }
 
 // Basic login throttling helpers
+function ensure_users_autoincrement(): void {
+    static $done=false; if($done) return; $done=true;
+    try {
+        $pdo = getPDO('btms_db');
+        $col = $pdo->query("SHOW COLUMNS FROM users LIKE 'id'")->fetch();
+        if($col && stripos($col['Extra']??'', 'auto_increment')===false){
+            // Try alter table to add primary key + auto increment if missing
+            try { $pdo->exec("ALTER TABLE users MODIFY id INT NOT NULL AUTO_INCREMENT"); } catch(Throwable $e){}
+            // Ensure PK
+            try { $pdo->exec("ALTER TABLE users ADD PRIMARY KEY (id)"); } catch(Throwable $e){}
+        }
+    } catch(Throwable $e){ /* ignore */ }
+}
+function ensure_admin_seed(): void {
+    static $done = false; if($done) return; $done=true;
+    try {
+        $pdo = getPDO('btms_db');
+    ensure_users_autoincrement();
+        $has = (int)$pdo->query("SELECT COUNT(*) FROM users WHERE role='admin'")->fetchColumn();
+        if($has===0) {
+            $hash = password_hash('admin', PASSWORD_DEFAULT);
+            $pdo->prepare("INSERT INTO users(username,password,role,must_change_password) VALUES('admin',?,'admin',1)")->execute([$hash]);
+        }
+    } catch(Throwable $e){ /* ignore */ }
+}
 function login_throttle_ok(string $username): bool {
     $now = time();
     // global block timer
@@ -52,26 +77,59 @@ function login_block_remaining(): int {
 function login_attempt(string $username, string $password): bool {
     $username = trim($username);
     if ($username==='') return false;
+    // Always ensure at least one admin exists (default admin/admin)
+    ensure_admin_seed();
+    // TEMP debug log (remove later)
+    try { file_put_contents(__DIR__.'/../storage/login_debug.log', date('Y-m-d H:i:s')." | user=$username\n", FILE_APPEND); } catch(Throwable $e){}
     // Throttle check
     if (!login_throttle_ok($username)) {
         return false;
     }
     // Search existing user in either db
     $user = find_user_in_db('yeb_business', $username) ?? find_user_in_db('btms_db', $username);
+    // Auto-seed admin if none exists and username == admin
+    if(!$user && $username === 'admin') {
+        try {
+            $pdo = getPDO('btms_db');
+            ensure_users_autoincrement();
+            $hasAdmin = (int)$pdo->query("SELECT COUNT(*) FROM users WHERE role='admin'")->fetchColumn();
+            if($hasAdmin === 0) {
+                $hash = password_hash($password, PASSWORD_DEFAULT);
+                $ins = $pdo->prepare("INSERT INTO users(username,password,role,must_change_password) VALUES(?,?,'admin',1)");
+                $ins->execute([$username,$hash]);
+                $user = find_user_in_db('btms_db', $username);
+            }
+        } catch(Throwable $e){ /* ignore */ }
+    }
     if (!$user) {
         // Auto-provision from employees master (btms_db)
         try {
             $pdo = getPDO('btms_db');
-            $stmt = $pdo->prepare('SELECT id, EmpNo FROM employees WHERE EmpNo = ? LIMIT 1');
-            $stmt->execute([$username]);
-            $emp = $stmt->fetch();
+            $emp = null; $empId = null;
+            ensure_users_autoincrement();
+            try {
+                $stmt = $pdo->prepare('SELECT id, EmpNo FROM employees WHERE EmpNo = ? LIMIT 1');
+                $stmt->execute([$username]);
+                $emp = $stmt->fetch();
+                if($emp){ $empId = $emp['id']; }
+            } catch(Throwable $e){ /* maybe table missing */ }
+            if(!$emp){
+                // fallback to employeemaster (no id field relationship, set employee_id NULL)
+                try {
+                    $stmt2 = $pdo->prepare('SELECT EmpNo FROM employeemaster WHERE EmpNo=? LIMIT 1');
+                    $stmt2->execute([$username]);
+                    $emp = $stmt2->fetch();
+                } catch(Throwable $e){ /* ignore */ }
+            }
             if ($emp) {
-                $hash = password_hash($emp['EmpNo'], PASSWORD_DEFAULT);
+                $empNo = $emp['EmpNo'];
+                $hash = password_hash($empNo, PASSWORD_DEFAULT);
                 $ins = $pdo->prepare('INSERT INTO users (username,password,role,employee_id) VALUES (?,?,"employee",?)');
-                $ins->execute([$emp['EmpNo'], $hash, $emp['id']]);
+                $ins->execute([$empNo, $hash, $empId]);
                 $user = find_user_in_db('btms_db', $username);
             }
         } catch (Throwable $e) {
+            // silent fail -> treat as invalid user
             return false;
         }
         if (!$user) return false;
@@ -82,6 +140,7 @@ function login_attempt(string $username, string $password): bool {
     // Constant small delay to reduce timing side channel
     usleep(random_int(20000,60000));
     if (!$valid) {
+        try { file_put_contents(__DIR__.'/../storage/login_debug.log', date('Y-m-d H:i:s')." | FAIL pw user=$username\n", FILE_APPEND); } catch(Throwable $e){}
         login_record_failure($username);
         return false;
     }
@@ -104,8 +163,10 @@ function login_attempt(string $username, string $password): bool {
         'username' => $user['username'],
         'role' => $user['role'],
         'employee_id' => $user['employee_id'] ?? null,
-        'must_change_password' => $user['must_change_password'] ?? 0
+        'must_change_password' => $user['must_change_password'] ?? 0,
+        'login_time' => time()
     ];
+    try { file_put_contents(__DIR__.'/../storage/login_debug.log', date('Y-m-d H:i:s')." | SUCCESS user=$username\n", FILE_APPEND); } catch(Throwable $e){}
     return true;
 }
 
@@ -121,7 +182,15 @@ function find_user_in_db(string $dbKey, string $username) {
 }
 
 function current_user(): ?array {
-    return $_SESSION['user'] ?? null;
+    $u = $_SESSION['user'] ?? null;
+    if (!$u) return null;
+    // Auto logout after 8 hours (28800 seconds)
+    $loginTime = $u['login_time'] ?? 0;
+    if ($loginTime && (time() - $loginTime) > 28800) {
+        logout_user();
+        return null;
+    }
+    return $u;
 }
 
 function is_logged_in(): bool {
@@ -135,8 +204,24 @@ function require_login(): void {
 }
 
 function logout_user(): void {
-    $_SESSION = [];
-    session_destroy();
+    // Clear all session data
+    if (session_status() === PHP_SESSION_ACTIVE) {
+        // Unset all session variables
+        $_SESSION = [];
+        // Get params to correctly remove the cookie
+        $params = session_get_cookie_params();
+        $cookieName = session_name();
+        // Invalidate the session cookie (set in past)
+        setcookie($cookieName, '', time() - 42000, $params['path'] ?? '/', $params['domain'] ?? '', ($params['secure'] ?? false), true);
+        // Destroy session storage
+        session_destroy();
+    }
+    // Proactively clear any additional auth-related cookies if added in future (pattern btms_*)
+    foreach ($_COOKIE as $k => $v) {
+        if (stripos($k, 'btms_') === 0) {
+            setcookie($k, '', time() - 42000, '/');
+        }
+    }
 }
 
 function user_has_role(string ...$roles): bool {

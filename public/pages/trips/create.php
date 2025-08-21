@@ -2,6 +2,17 @@
 // Allow both employee and admin to create/register trips
 require_role('employee','admin');
 $pdo = getPDO();
+$__trips_fixed = false;
+try {
+  $col = $pdo->query("SHOW COLUMNS FROM trips LIKE 'id'")->fetch(PDO::FETCH_ASSOC);
+  if($col && stripos(($col['Extra']??''),'auto_increment')===false){
+    // Ensure primary key then modify to AUTO_INCREMENT
+    try { $hasPk = $pdo->query("SHOW INDEX FROM trips WHERE Key_name='PRIMARY'")->fetch(); if(!$hasPk){ $pdo->exec("ALTER TABLE trips ADD PRIMARY KEY (id)"); } } catch(Throwable $e){}
+    try { $pdo->exec("ALTER TABLE trips MODIFY id INT NOT NULL AUTO_INCREMENT"); } catch(Throwable $e){}
+    try { $next = (int)$pdo->query("SELECT MAX(id)+1 FROM trips")->fetchColumn(); if($next<1) $next=1; $pdo->exec("ALTER TABLE trips AUTO_INCREMENT=".$next); } catch(Throwable $e){}
+    $__trips_fixed = true;
+  }
+} catch(Throwable $e) { /* ignore */ }
 $user = current_user();
 
 // Unified dropdown (searchable) always includes LOCAL employees from employees table.
@@ -9,6 +20,13 @@ $user = current_user();
 // employeemaster (if exists) only used for better name/DeptCode correction, not to exclude locals.
 $employeesLocal = [];$employeesJapan=[];$hasJapan=false;$fromMaster=false;
 try { $fromMaster = (bool)$pdo->query("SHOW TABLES LIKE 'employeemaster'")->fetch(); } catch(Exception $e) {}
+
+// Department name map (dept_code => name)
+$deptNameMap = [];
+try {
+  $deps = $pdo->query("SELECT dept_code,name FROM departments")->fetchAll(PDO::FETCH_ASSOC);
+  foreach($deps as $d){ $deptNameMap[$d['dept_code']] = $d['name']; }
+} catch(Exception $e) { /* ignore if table missing */ }
 
 // Load local employees
 try { $employeesLocal = $pdo->query("SELECT id, EmpNo, Name, DeptCode FROM employees ORDER BY Name LIMIT 1500")->fetchAll(PDO::FETCH_ASSOC); } catch(Exception $e) {}
@@ -223,6 +241,10 @@ if ($_SERVER['REQUEST_METHOD']==='POST' && verify_csrf()) {
                     <label class="form-label small text-muted mb-1">Department</label>
                     <input class="form-control" value="<?= esc($lr['DeptCode'] ?? '-') ?>" readonly>
                   </div>
+                  <div class="col-md-2 col-sm-6">
+                    <label class="form-label small text-muted mb-1">Dept Name</label>
+                    <input class="form-control" value="<?= isset($lr['DeptCode']) && isset($deptNameMap[$lr['DeptCode']]) ? esc($deptNameMap[$lr['DeptCode']]) : '' ?>" readonly>
+                  </div>
                 </div>
               <?php else: ?>
                 <div class="row g-3">
@@ -274,6 +296,10 @@ if ($_SERVER['REQUEST_METHOD']==='POST' && verify_csrf()) {
                   <div class="col-lg-2 col-md-4 col-sm-6">
                     <label class="form-label fw-medium mb-2">Department</label>
                     <input name="emp_department" id="empDept" class="form-control border-2" readonly style="border-radius: 8px; background: #f8f9fa;">
+                  </div>
+                  <div class="col-lg-3 col-md-4 col-sm-6">
+                    <label class="form-label fw-medium mb-2">Dept Name</label>
+                    <input id="empDeptName" class="form-control border-2" readonly style="border-radius: 8px; background:#f8f9fa;">
                   </div>
                   <div class="col-lg-3 col-md-8 col-sm-12">
                     <label class="form-label fw-medium mb-2">Description</label>
@@ -382,21 +408,27 @@ if ($_SERVER['REQUEST_METHOD']==='POST' && verify_csrf()) {
 document.addEventListener('DOMContentLoaded', () => {
   const empNo = document.getElementById('empNo');
   const empDept = document.getElementById('empDept');
+  const empDeptName = document.getElementById('empDeptName');
   const desc = document.getElementById('empDesc');
   const sel = document.getElementById('employeeSelect');
   const filter = document.getElementById('employeeFilter');
+  const deptMap = <?= json_encode($deptNameMap, JSON_UNESCAPED_UNICODE) ?>;
   if(sel && filter){
     sel.addEventListener('change', () => {
       const opt = sel.options[sel.selectedIndex];
       empNo && (empNo.value = opt.getAttribute('data-empno') || '');
       empDept && (empDept.value = opt.getAttribute('data-dept') || '');
+      if(empDeptName){
+        const code = opt.getAttribute('data-dept') || '';
+        empDeptName.value = code && deptMap[code] ? deptMap[code] : '';
+      }
       if (desc && !desc.value) desc.value = opt.getAttribute('data-name') || '';
       if (opt && opt.getAttribute('data-source')) {
         document.querySelectorAll('input[name="employee_source"]').forEach(r => {
           r.checked = (r.value === opt.getAttribute('data-source'));
         });
       }
-      [empNo, empDept].forEach(input => { if(input && input.value){ input.classList.add('border-success'); setTimeout(()=>input.classList.remove('border-success'),2000);} });
+      [empNo, empDept, empDeptName].forEach(input => { if(input && input.value){ input.classList.add('border-success'); setTimeout(()=>input.classList.remove('border-success'),2000);} });
     });
     let filterTimeout;
     filter.addEventListener('input', () => {

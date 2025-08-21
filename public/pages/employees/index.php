@@ -2,108 +2,249 @@
 require_role('admin');
 $pdo = getPDO();
 
-// Get filter parameter
-$filter = $_GET['filter'] ?? 'all'; // 'all', 'regular', 'japan'
+// Parameters
+$filter = $_GET['filter'] ?? 'all';
+$search = trim($_GET['q'] ?? '');
+// Pagination params
+$pageNum = max(1, (int)($_GET['p'] ?? 1));
+$pageSize = (int)($_GET['ps'] ?? 20);
+if (!in_array($pageSize, [20, 25, 50, 75, 100], true)) $pageSize = 20;
+$offset = ($pageNum - 1) * $pageSize;
+$hasSearch = $search !== '';
+$searchLike = '%' . $search . '%';
 
-// Determine which schema we have: original normalized employees vs raw master-style columns
+// Detect schema
 $hasEmpNo = false;
 $useEmployeeMasterTable = false;
+$hasDesignationId = false; // employees.designation_id exists?
 $rows = [];
 try {
   $cols = $pdo->query("DESCRIBE employees")->fetchAll(PDO::FETCH_COLUMN, 0);
   $colsLower = array_map('strtolower', $cols);
-  if (in_array('empno', $colsLower)) {
-    $hasEmpNo = true;
-  }
-} catch (Exception $e) {
-  // employees table might not exist yet
+  if (in_array('empno', $colsLower)) $hasEmpNo = true;
+  if (in_array('designation_id', $colsLower)) $hasDesignationId = true;
+} catch (Exception $e) { /* ignore */
 }
-
 if (!$hasEmpNo) {
-  // Check alternate table employeemaster
   try {
     $t = $pdo->query("SHOW TABLES LIKE 'employeemaster'")->fetch();
-    if ($t) {
-      $useEmployeeMasterTable = true;
-    }
-  } catch (Exception $e) {
+    if ($t) $useEmployeeMasterTable = true;
+  } catch (Exception $e) { /* ignore */
   }
 }
 
-// Fetch data based on filter
+// total count helper closure (raw modes only)
+$totalRows = 0;
 if ($hasEmpNo) {
   if ($filter === 'regular') {
-    $stmt = $pdo->query("SELECT id, EmpNo, Name, DeptCode, ClasCode, DestCode, Sex, Resigned, GrpCode, 'regular' as employee_type FROM employees ORDER BY Name");
-  } elseif ($filter === 'japan') {
-    // Check if japanemployees table exists
-    try {
-      $japanTable = $pdo->query("SHOW TABLES LIKE 'japanemployees'")->fetch();
-      if ($japanTable) {
-        $stmt = $pdo->query("SELECT id, EmpNo, Name, DeptCode, ClasCode, DestCode, Sex, Resigned, GrpCode, 'japan' as employee_type FROM japanemployees ORDER BY Name");
-      } else {
-        $stmt = $pdo->query("SELECT id, EmpNo, Name, DeptCode, ClasCode, DestCode, Sex, Resigned, GrpCode, 'japan' as employee_type FROM employees WHERE DeptCode IN ('JP', 'JG', 'JD') ORDER BY Name");
-      }
-    } catch (Exception $e) {
-      $stmt = $pdo->query("SELECT id, EmpNo, Name, DeptCode, ClasCode, DestCode, Sex, Resigned, GrpCode, 'japan' as employee_type FROM employees WHERE DeptCode IN ('JP', 'JG', 'JD') ORDER BY Name");
+    $sql = "SELECT id, EmpNo, Name, DeptCode, ClasCode, DestCode, " . ($hasDesignationId ? "designation_id, " : "NULL AS designation_id,") . " Sex, Resigned, GrpCode, 'regular' as employee_type FROM employees";
+    $params = [];
+    if ($hasSearch) {
+      $sql .= " WHERE (Name LIKE ? OR EmpNo LIKE ?)";
+      $params = [$searchLike, $searchLike];
     }
-  } else { // all
+    $sql .= " ORDER BY Name";
+    // Count
+    $countSql = 'SELECT COUNT(*) FROM (' . $sql . ') c';
+    $cStmt = $pdo->prepare($countSql);
+    $cStmt->execute($params);
+    $totalRows = (int)$cStmt->fetchColumn();
+    $sql .= " LIMIT $pageSize OFFSET $offset";
+    $stmt = $pdo->prepare($sql);
+    $stmt->execute($params);
+  } elseif ($filter === 'japan') {
+    $params = [];
     try {
       $japanTable = $pdo->query("SHOW TABLES LIKE 'japanemployees'")->fetch();
-      if ($japanTable) {
-        $stmt = $pdo->query("
-                    SELECT id, EmpNo, Name, DeptCode, ClasCode, DestCode, Sex, Resigned, GrpCode, 'regular' as employee_type FROM employees
-                    UNION ALL
-                    SELECT id, EmpNo, Name, DeptCode, ClasCode, DestCode, Sex, Resigned, GrpCode, 'japan' as employee_type FROM japanemployees
-                    ORDER BY Name
-                ");
-      } else {
-        $stmt = $pdo->query("SELECT id, EmpNo, Name, DeptCode, ClasCode, DestCode, Sex, Resigned, GrpCode, 
-                    CASE WHEN DeptCode IN ('JP', 'JG', 'JD') THEN 'japan' ELSE 'regular' END as employee_type 
-                    FROM employees ORDER BY Name");
-      }
     } catch (Exception $e) {
-      $stmt = $pdo->query("SELECT id, EmpNo, Name, DeptCode, ClasCode, DestCode, Sex, Resigned, GrpCode, 
-                CASE WHEN DeptCode IN ('JP', 'JG', 'JD') THEN 'japan' ELSE 'regular' END as employee_type 
-                FROM employees ORDER BY Name");
+      $japanTable = null;
+    }
+    if ($japanTable) {
+      $sql = "SELECT id, EmpNo, Name, DeptCode, ClasCode, DestCode, " . ($hasDesignationId ? "designation_id, " : "NULL AS designation_id,") . " Sex, Resigned, GrpCode, 'japan' as employee_type FROM japanemployees";
+    } else {
+      $sql = "SELECT id, EmpNo, Name, DeptCode, ClasCode, DestCode, " . ($hasDesignationId ? "designation_id, " : "NULL AS designation_id,") . " Sex, Resigned, GrpCode, 'japan' as employee_type FROM employees WHERE DeptCode IN ('JP','JG','JD')";
+    }
+    if ($hasSearch) {
+      if (stripos($sql, 'WHERE') !== false) $sql .= " AND (Name LIKE ? OR EmpNo LIKE ?)";
+      else $sql .= " WHERE (Name LIKE ? OR EmpNo LIKE ?)";
+      $params = [$searchLike, $searchLike];
+    }
+    $sql .= " ORDER BY Name";
+    $countSql = 'SELECT COUNT(*) FROM (' . $sql . ') c';
+    $cStmt = $pdo->prepare($countSql);
+    $cStmt->execute($params);
+    $totalRows = (int)$cStmt->fetchColumn();
+    $sql .= " LIMIT $pageSize OFFSET $offset";
+    $stmt = $pdo->prepare($sql);
+    $stmt->execute($params);
+  } else { // all
+    $params = [];
+    $japanExists = false;
+    try {
+      $japanExists = (bool)$pdo->query("SHOW TABLES LIKE 'japanemployees'")->fetch();
+    } catch (Exception $e) {
+      $japanExists = false;
+    }
+    if ($japanExists) {
+      if ($hasSearch) {
+        $sql = "SELECT id, EmpNo, Name, DeptCode, ClasCode, DestCode, " . ($hasDesignationId ? "designation_id, " : "NULL AS designation_id,") . " Sex, Resigned, GrpCode, 'regular' as employee_type FROM employees WHERE (Name LIKE ? OR EmpNo LIKE ?)\n        UNION ALL\n        SELECT id, EmpNo, Name, DeptCode, ClasCode, DestCode, " . ($hasDesignationId ? "designation_id, " : "NULL AS designation_id,") . " Sex, Resigned, GrpCode, 'japan' as employee_type FROM japanemployees WHERE (Name LIKE ? OR EmpNo LIKE ?)\n        ORDER BY Name";
+        $countSql = 'SELECT COUNT(*) FROM (' . $sql . ') c';
+        $cStmt = $pdo->prepare($countSql);
+        $cStmt->execute([$searchLike, $searchLike, $searchLike, $searchLike]);
+        $totalRows = (int)$cStmt->fetchColumn();
+        $sql .= " LIMIT $pageSize OFFSET $offset";
+        $stmt = $pdo->prepare($sql);
+        $stmt->execute([$searchLike, $searchLike, $searchLike, $searchLike]);
+      } else {
+        $sql = "SELECT * FROM ((SELECT id, EmpNo, Name, DeptCode, ClasCode, DestCode, " . ($hasDesignationId ? "designation_id, " : "NULL AS designation_id,") . " Sex, Resigned, GrpCode, 'regular' as employee_type FROM employees)\n        UNION ALL\n        (SELECT id, EmpNo, Name, DeptCode, ClasCode, DestCode, " . ($hasDesignationId ? "designation_id, " : "NULL AS designation_id,") . " Sex, Resigned, GrpCode, 'japan' as employee_type FROM japanemployees)) u";
+        $countSql = 'SELECT COUNT(*) FROM (' . $sql . ') c';
+        $totalRows = (int)$pdo->query($countSql)->fetchColumn();
+        $sql .= " ORDER BY Name LIMIT $pageSize OFFSET $offset";
+        $stmt = $pdo->query($sql);
+      }
+    } else {
+      $sql = "SELECT id, EmpNo, Name, DeptCode, ClasCode, DestCode, " . ($hasDesignationId ? "designation_id, " : "NULL AS designation_id,") . " Sex, Resigned, GrpCode, CASE WHEN DeptCode IN ('JP','JG','JD') THEN 'japan' ELSE 'regular' END as employee_type FROM employees";
+      if ($hasSearch) {
+        $sql .= " WHERE (Name LIKE ? OR EmpNo LIKE ?)";
+        $params = [$searchLike, $searchLike];
+      }
+      $countSql = 'SELECT COUNT(*) FROM (' . $sql . ') c';
+      $cStmt = $pdo->prepare($countSql);
+      $cStmt->execute($params);
+      $totalRows = (int)$cStmt->fetchColumn();
+      $sql .= " ORDER BY Name LIMIT $pageSize OFFSET $offset";
+      $stmt = $pdo->prepare($sql);
+      $stmt->execute($params);
     }
   }
   $mode = 'raw-employees';
   $rows = $stmt->fetchAll();
-} elseif ($useEmployeeMasterTable) {
-  if ($filter === 'regular') {
-    $stmt = $pdo->query("SELECT EmpNo, Name, DeptCode, ClasCode, DestCode, Sex, Resigned, GrpCode, 'regular' as employee_type FROM employeemaster WHERE DeptCode NOT IN ('JP', 'JG', 'JD') ORDER BY Name");
-  } elseif ($filter === 'japan') {
-    $stmt = $pdo->query("SELECT EmpNo, Name, DeptCode, ClasCode, DestCode, Sex, Resigned, GrpCode, 'japan' as employee_type FROM employeemaster WHERE DeptCode IN ('JP', 'JG', 'JD') ORDER BY Name");
-  } else { // all
-    $stmt = $pdo->query("SELECT EmpNo, Name, DeptCode, ClasCode, DestCode, Sex, Resigned, GrpCode, 
-            CASE WHEN DeptCode IN ('JP', 'JG', 'JD') THEN 'japan' ELSE 'regular' END as employee_type 
-            FROM employeemaster ORDER BY Name");
+  // Map designation names if possible
+  if ($hasDesignationId) {
+    $ids = [];
+    foreach ($rows as $r) {
+      if (!empty($r['designation_id'])) $ids[$r['designation_id']] = true;
+    }
+    if ($ids) {
+      $in = implode(',', array_map('intval', array_keys($ids)));
+      try {
+        $desMap = $pdo->query("SELECT id,name FROM designations WHERE id IN ($in)")->fetchAll(PDO::FETCH_KEY_PAIR);
+      } catch (Exception $e) {
+        $desMap = [];
+      }
+      foreach ($rows as &$r) {
+        if (!empty($r['designation_id']) && isset($desMap[$r['designation_id']])) $r['DesignationName'] = $desMap[$r['designation_id']];
+      }
+      unset($r);
+    }
   }
+} elseif ($useEmployeeMasterTable) {
+  $params = [];
+  if ($filter === 'regular') {
+    $sql = "SELECT EmpNo, Name, DeptCode, ClasCode, DestCode, Sex, Resigned, GrpCode, 'regular' as employee_type FROM employeemaster WHERE DeptCode NOT IN ('JP','JG','JD')";
+    if ($hasSearch) {
+      $sql .= " AND (Name LIKE ? OR EmpNo LIKE ?)";
+      $params = [$searchLike, $searchLike];
+    }
+  } elseif ($filter === 'japan') {
+    $sql = "SELECT EmpNo, Name, DeptCode, ClasCode, DestCode, Sex, Resigned, GrpCode, 'japan' as employee_type FROM employeemaster WHERE DeptCode IN ('JP','JG','JD')";
+    if ($hasSearch) {
+      $sql .= " AND (Name LIKE ? OR EmpNo LIKE ?)";
+      $params = [$searchLike, $searchLike];
+    }
+  } else {
+    $sql = "SELECT EmpNo, Name, DeptCode, ClasCode, DestCode, Sex, Resigned, GrpCode, CASE WHEN DeptCode IN ('JP','JG','JD') THEN 'japan' ELSE 'regular' END as employee_type FROM employeemaster";
+    if ($hasSearch) {
+      $sql .= " WHERE (Name LIKE ? OR EmpNo LIKE ?)";
+      $params = [$searchLike, $searchLike];
+    }
+  }
+  $countSql = 'SELECT COUNT(*) FROM (' . $sql . ') c';
+  $cStmt = $pdo->prepare($countSql);
+  $cStmt->execute($params);
+  $totalRows = (int)$cStmt->fetchColumn();
+  $sql .= " ORDER BY Name LIMIT $pageSize OFFSET $offset";
+  $stmt = $pdo->prepare($sql);
+  $stmt->execute($params);
   $mode = 'employee-master';
   $rows = $stmt->fetchAll();
+  // Attempt map designation by DestCode->designations.name (names created from codes during import)
+  if ($rows) {
+    $codes = [];
+    foreach ($rows as $r) {
+      if (!empty($r['DestCode'])) $codes[$r['DestCode']] = true;
+    }
+    if ($codes) {
+      $placeholders = implode(',', array_fill(0, count($codes), '?'));
+      try {
+        $stmtD = $pdo->prepare("SELECT name FROM designations WHERE name IN ($placeholders)");
+        $stmtD->execute(array_keys($codes));
+        $names = $stmtD->fetchAll(PDO::FETCH_COLUMN);
+        $nameSet = array_flip($names);
+        foreach ($rows as &$r) {
+          if (!empty($r['DestCode']) && isset($nameSet[$r['DestCode']])) $r['DesignationName'] = $r['DestCode'];
+        }
+        unset($r);
+      } catch (Exception $e) {
+      }
+    }
+  }
 } else {
-  // Legacy normalized structure
-  $stmt = $pdo->query('SELECT e.id,e.name,d.name department,g.name team,ds.name designation, "regular" as employee_type
+  if ($hasSearch) {
+    $baseNorm = 'SELECT e.id,e.name,d.name department,g.name team,ds.name designation, "regular" as employee_type
       FROM employees e
       LEFT JOIN departments d ON d.id=e.department_id
       LEFT JOIN `groups` g ON g.id=e.group_id
-      LEFT JOIN designations ds ON ds.id=e.designation_id
-      ORDER BY e.name');
+      LEFT JOIN designations ds ON ds.id=e.designation_id';
+    $countSql = $baseNorm . ' WHERE e.name LIKE ?';
+    $cStmt = $pdo->prepare('SELECT COUNT(*) FROM (' . $countSql . ') c');
+    $cStmt->execute([$searchLike]);
+    $totalRows = (int)$cStmt->fetchColumn();
+    $stmt = $pdo->prepare($baseNorm . ' WHERE e.name LIKE ? ORDER BY e.name LIMIT ' . $pageSize . ' OFFSET ' . $offset);
+    $stmt->execute([$searchLike]);
+  } else {
+    $baseNorm = 'SELECT e.id,e.name,d.name department,g.name team,ds.name designation, "regular" as employee_type
+      FROM employees e
+      LEFT JOIN departments d ON d.id=e.department_id
+      LEFT JOIN `groups` g ON g.id=e.group_id
+      LEFT JOIN designations ds ON ds.id=e.designation_id';
+    $countSql = 'SELECT COUNT(*) FROM (' . $baseNorm . ') c';
+    $totalRows = (int)$pdo->query($countSql)->fetchColumn();
+    $stmt = $pdo->query($baseNorm . ' ORDER BY e.name LIMIT ' . $pageSize . ' OFFSET ' . $offset);
+  }
   $mode = 'normalized';
   $rows = $stmt->fetchAll();
 }
 
-// Count statistics for badges
+// Stats
 $stats = ['all' => 0, 'regular' => 0, 'japan' => 0];
+if (!isset($mode)) $mode = 'normalized';
+if (!isset($rows) || !is_array($rows)) $rows = [];
 if ($mode !== 'normalized') {
-  foreach ($rows as $row) {
-    $type = $row['employee_type'] ?? 'regular';
-    $stats[$type]++;
+  foreach ($rows as $r) {
+    $t = $r['employee_type'] ?? 'regular';
+    $stats[$t]++;
     $stats['all']++;
   }
 } else {
-  $stats['all'] = count($rows);
-  $stats['regular'] = count($rows);
+  $stats['all'] = $totalRows;
+  $stats['regular'] = $totalRows;
+}
+
+// Build DeptCode -> Department Name map (raw modes)
+$deptNameMap = [];
+try {
+  $drows = $pdo->query('SELECT dept_code,name FROM departments')->fetchAll();
+  foreach ($drows as $dr) {
+    $deptNameMap[$dr['dept_code']] = $dr['name'];
+  }
+} catch (Throwable $e) { /* ignore */
+}
+
+// Pagination calc
+$totalPages = max(1, (int)ceil(($totalRows ?: 0) / $pageSize));
+if ($pageNum > $totalPages) {
+  $pageNum = $totalPages;
 }
 ?>
 <div class="content-section fade-in">
@@ -112,15 +253,23 @@ if ($mode !== 'normalized') {
       <h4 class="mb-2">Employee Management</h4>
       <p class="text-muted mb-0 small">Manage regular and Japanese employees</p>
     </div>
-    <a href="index.php?page=employees/create" class="btn btn-primary btn-modern">
-      <i class="fas fa-plus me-2"></i>Add Employee
-    </a>
+    <div class="d-flex gap-2">
+      <!-- <a href="index.php?page=employees/import" class="btn btn-outline-secondary btn-modern">
+        <i class="fas fa-file-upload me-2"></i>Import
+      </a> -->
+      <!-- <a href="index.php?page=users/sync" class="btn btn-outline-primary btn-modern">
+        <i class="fas fa-users-cog me-2"></i>Sync Users
+      </a> -->
+      <a href="index.php?page=employees/create" class="btn btn-primary btn-modern">
+        <i class="fas fa-plus me-2"></i>Add Employee
+      </a>
+    </div>
   </div>
 
   <!-- Filter Tabs -->
   <div class="card card-clean border-0 mb-4">
     <div class="card-body p-3">
-      <div class="d-flex flex-wrap align-items-center gap-2">
+      <div class="d-flex flex-wrap align-items-center gap-2 w-100">
         <span class="text-muted small fw-semibold me-2">Filter by Type:</span>
         <div class="btn-group" role="group" aria-label="Employee filter">
           <input type="radio" class="btn-check" name="employee-filter" id="filter-all" <?= $filter === 'all' ? 'checked' : '' ?>>
@@ -148,13 +297,35 @@ if ($mode !== 'normalized') {
           </label>
         </div>
 
-        <?php if ($mode !== 'normalized'): ?>
-          <div class="ms-auto">
+        <div class="ms-auto d-flex align-items-center gap-2">
+          <form id="employeeSearchForm" method="get" action="index.php" class="d-flex align-items-center gap-2">
+            <input type="hidden" name="page" value="employees/index">
+            <input type="hidden" name="filter" value="<?= esc($filter) ?>">
+            <div class="input-group input-group-sm position-relative" style="overflow:visible;">
+              <input type="text" name="q" id="searchInput" class="form-control" placeholder="Search name / EmpNo" value="<?= esc($search) ?>" autocomplete="off" />
+              <div id="searchSuggest" class="list-group position-absolute shadow-sm" style="top:100%;left:0;right:0;z-index:30; max-height:260px; overflow:auto; display:none;"></div>
+              <?php if ($hasSearch): ?>
+                <button class="btn btn-outline-secondary" type="button" title="Clear" onclick="document.querySelector('#employeeSearchForm input[name=q]').value=''; document.getElementById('employeeSearchForm').submit();">&times;</button>
+              <?php endif; ?>
+              <button class="btn btn-primary" type="submit" title="Search"><i class="fas fa-search"></i></button>
+            </div>
+          </form>
+          <form method="get" class="ms-2">
+            <input type="hidden" name="page" value="employees/index">
+            <input type="hidden" name="filter" value="<?= esc($filter) ?>">
+            <?php if ($hasSearch): ?><input type="hidden" name="q" value="<?= esc($search) ?>"><?php endif; ?>
+            <select name="ps" class="form-select form-select-sm" onchange="this.form.submit()">
+              <?php foreach ([20, 25, 50, 75, 100] as $ps): ?>
+                <option value="<?= $ps ?>" <?= $ps === $pageSize ? 'selected' : '' ?>><?= $ps ?></option>
+              <?php endforeach; ?>
+            </select>
+          </form>
+          <?php if ($mode !== 'normalized'): ?>
             <span class="badge badge-modern bg-light text-dark">
               <i class="fas fa-database me-1"></i>Mode: <?= esc($mode) ?>
             </span>
-          </div>
-        <?php endif; ?>
+          <?php endif; ?>
+        </div>
       </div>
     </div>
   </div>
@@ -178,7 +349,8 @@ if ($mode !== 'normalized') {
               <th>Type</th>
               <th>EmpNo</th>
               <th>Name</th>
-              <th>DeptCode</th>
+              <th>Dept</th>
+              <th>Designation</th>
               <th>ClasCode</th>
               <th>DestCode</th>
               <th>Sex</th>
@@ -226,11 +398,16 @@ if ($mode !== 'normalized') {
                 <td data-label="Name">
                   <div class="fw-semibold"><?= esc($r['Name']) ?></div>
                 </td>
-                <td data-label="DeptCode">
-                  <?php if (!empty($r['DeptCode'])): ?>
-                    <span class="badge badge-modern bg-light text-dark"><?= esc($r['DeptCode']) ?></span>
+                <td data-label="Dept">
+                  <?php if (!empty($r['DeptCode'])): $dc = $r['DeptCode'];
+                    $dn = $deptNameMap[$dc] ?? ''; ?>
+                    <div class="small fw-semibold mb-1"><span class="badge badge-modern bg-light text-dark"><?= esc($dc) ?></span></div>
+                    <?php if ($dn): ?><div class="small text-muted" style="max-width:120px;white-space:normal; line-height:1.1;"><?= esc($dn) ?></div><?php endif; ?>
                   <?php endif; ?>
                 </td>
+                <td data-label="Designation"><?php $dName = $r['DesignationName'] ?? '';
+                                              if (!$dName && !empty($r['DestCode'])) $dName = $r['DestCode'];
+                                              if ($dName): ?><span class="badge bg-secondary-subtle text-dark border"><?= esc($dName) ?></span><?php endif; ?></td>
                 <td data-label="ClasCode"><?= esc(isset($r['ClasCode']) ? $r['ClasCode'] : '') ?></td>
                 <td data-label="DestCode"><?= esc(isset($r['DestCode']) ? $r['DestCode'] : '') ?></td>
                 <td data-label="Sex">
@@ -273,6 +450,38 @@ if ($mode !== 'normalized') {
           <?php endforeach; ?>
         </tbody>
       </table>
+      <?php if ($totalPages > 1): ?>
+        <nav class="p-2">
+          <ul class="pagination pagination-sm mb-0 flex-wrap">
+            <?php
+            $baseUrl = function ($p) use ($filter, $search, $pageSize) {
+              $u = new \stdClass();
+              $query = ['page' => 'employees/index', 'filter' => $filter, 'p' => $p, 'ps' => $pageSize];
+              if ($search !== '') $query['q'] = $search;
+              return 'index.php?' . http_build_query($query);
+            };
+            ?>
+            <li class="page-item <?= $pageNum <= 1 ? 'disabled' : '' ?>"><a class="page-link" href="<?= $baseUrl(max(1, $pageNum - 1)) ?>">&laquo;</a></li>
+            <?php
+            $window = 3;
+            $start = max(1, $pageNum - $window);
+            $end = min($totalPages, $pageNum + $window);
+            if ($start > 1) {
+              echo '<li class="page-item"><a class="page-link" href="' . $baseUrl(1) . '">1</a></li>';
+              if ($start > 2) echo '<li class="page-item disabled"><span class="page-link">…</span></li>';
+            }
+            for ($i = $start; $i <= $end; $i++) {
+              echo '<li class="page-item ' . ($i == $pageNum ? 'active' : '') . '"><a class="page-link" href="' . $baseUrl($i) . '">' . $i . '</a></li>';
+            }
+            if ($end < $totalPages) {
+              if ($end < $totalPages - 1) echo '<li class="page-item disabled"><span class="page-link">…</span></li>';
+              echo '<li class="page-item"><a class="page-link" href="' . $baseUrl($totalPages) . '">' . $totalPages . '</a></li>';
+            }
+            ?>
+            <li class="page-item <?= $pageNum >= $totalPages ? 'disabled' : '' ?>"><a class="page-link" href="<?= $baseUrl(min($totalPages, $pageNum + 1)) ?>">&raquo;</a></li>
+          </ul>
+        </nav>
+      <?php endif; ?>
     </div>
   </div>
 </div>
@@ -307,8 +516,60 @@ if ($mode !== 'normalized') {
   // Filter function
   function filterEmployees(type) {
     const url = new URL(window.location);
+    url.searchParams.set('page', 'employees/index');
     url.searchParams.set('filter', type);
+    url.searchParams.set('p', '1');
+    // preserve search query if present
+    const qInput = document.querySelector('#employeeSearchForm input[name=q]');
+    if (qInput && qInput.value.trim() !== '') {
+      url.searchParams.set('q', qInput.value.trim());
+    } else {
+      url.searchParams.delete('q');
+    }
     window.location.href = url.toString();
+  }
+
+  // Live suggestion
+  const searchEl = document.getElementById('searchInput');
+  const suggestBox = document.getElementById('searchSuggest');
+  let suggestTimer = null;
+
+  function hideSuggest() {
+    suggestBox.style.display = 'none';
+    suggestBox.innerHTML = '';
+  }
+
+  function fetchSuggest(v) {
+    if (!v) {
+      hideSuggest();
+      return;
+    }
+    fetch('index.php?page=employees/suggest&q=' + encodeURIComponent(v))
+      .then(r => r.json())
+      .then(rows => {
+        if (!Array.isArray(rows) || rows.length === 0) {
+          hideSuggest();
+          return;
+        }
+        suggestBox.innerHTML = rows.map(r => `<button type="button" class="list-group-item list-group-item-action py-1 px-2" data-val="${(r.empno||'').replace(/"/g,'&quot;')}" data-name="${(r.name||'').replace(/"/g,'&quot;')}"><strong>${r.empno||''}</strong> - ${r.name||''}</button>`).join('');
+        suggestBox.style.display = 'block';
+      }).catch(() => hideSuggest());
+  }
+  if (searchEl) {
+    searchEl.addEventListener('input', () => {
+      clearTimeout(suggestTimer);
+      suggestTimer = setTimeout(() => fetchSuggest(searchEl.value.trim()), 220);
+    });
+    document.addEventListener('click', e => {
+      if (!suggestBox.contains(e.target) && e.target !== searchEl) hideSuggest();
+    });
+    suggestBox.addEventListener('click', e => {
+      const btn = e.target.closest('button[data-val]');
+      if (!btn) return;
+      searchEl.value = btn.getAttribute('data-name');
+      hideSuggest();
+      document.getElementById('employeeSearchForm').submit();
+    });
   }
 
   window.addEventListener('load', function() {

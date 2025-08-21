@@ -13,8 +13,10 @@ $allowed = [
     'dashboard',
     'employees/index',
     'employees/create',
+    'employees/import',
     'employees/edit',
     'employees/delete',
+    'employees/suggest',
     'masters/department',
     'masters/group',
     'masters/designation',
@@ -32,13 +34,17 @@ $allowed = [
     'settlements/index',
     'settlements/create',
     'settlements/pdf'
+    ,'users/sync'
+    ,'users/reset'
+    ,'users/rebuild'
+    ,'users/create'
 ];
 
 // Role-based restrictions (pages each role MAY access besides login/signup)
 $rolePages = [
-    'employee' => ['dashboard', 'trips/create', 'trips/pdf', 'trips/view', 'settlements/index', 'settlements/create', 'settlements/pdf'],
+    'employee' => ['dashboard', 'trips/create', 'trips/pdf', 'trips/view',],
     'manager'  => ['dashboard', 'trips/index', 'trips/create', 'trips/approve', 'trips/edit', 'trips/view', 'trips/pdf', 'settlements/index', 'settlements/create', 'settlements/pdf'],
-    'admin'    => $allowed // admin full access
+    'admin'    => $allowed // admin full access (auto includes users/create)
 ];
 
 if (!in_array($page, $allowed, true)) {
@@ -99,7 +105,7 @@ if (in_array($page, ['login', 'signup'], true)) {
         }
 
         // Raw pages that must NOT include the global layout (so they can send their own headers / printable docs)
-        $rawPages = ['trips/pdf', 'settlements/pdf'];
+    $rawPages = ['trips/pdf', 'settlements/pdf', 'employees/suggest'];
         if (in_array($page, $rawPages, true)) {
             $target = __DIR__ . '/pages/' . $page . '.php';
             if (is_file($target)) {

@@ -60,6 +60,18 @@ $current = $page ?? ($_GET['page'] ?? 'dashboard');
             <a class="nav-link<?= $current === 'employees/index' ? ' active' : '' ?>" href="index.php?page=employees/index">
               <i class="fas fa-users"></i> Employee Data
             </a>
+            <a class="nav-link<?= $current === 'users/create' ? ' active' : '' ?>" href="index.php?page=users/create">
+              <i class="fas fa-user-plus"></i> Add User Manual
+            </a>
+            <a class="nav-link<?= $current === 'users/reset' ? ' active' : '' ?>" href="index.php?page=users/reset">
+              <i class="fas fa-key"></i> Reset Password
+            </a>
+            <a class="nav-link<?= $current === 'users/sync' ? ' active' : '' ?>" href="index.php?page=users/sync">
+              <i class="fas fa-users-cog"></i> Sync Users
+            </a>
+            <a class="nav-link<?= $current === 'users/rebuild' ? ' active' : '' ?>" href="index.php?page=users/rebuild">
+              <i class="fas fa-recycle"></i> Rebuild Users
+            </a>
           <?php endif; ?>
         </nav>
         <div class="mt-auto btms-userbox">
