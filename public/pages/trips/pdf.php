@@ -1,15 +1,18 @@
 <?php
-// Approval Of Business Trip PDF (YBR-HRD065) – layout replicates provided form
+
 $user = current_user();
 if (!$user) redirect('index.php?page=login');
 $id = (int)($_GET['id'] ?? 0);
 if (!$id) exit('Missing id');
+
 $pdo = getPDO();
-$stmt = $pdo->prepare("SELECT t.*, COALESCE(t.emp_name,e.Name) employee_name, COALESCE(t.emp_no,e.EmpNo) employee_empno, e.DeptCode FROM trips t LEFT JOIN employees e ON e.id=t.employee_id WHERE t.id=?");
+$stmt = $pdo->prepare("SELECT t.*, COALESCE(t.emp_name,e.Name) employee_name, COALESCE(t.emp_no,e.EmpNo) employee_empno, e.DeptCode
+                       FROM trips t LEFT JOIN employees e ON e.id=t.employee_id WHERE t.id=?");
 $stmt->execute([$id]);
 $trip = $stmt->fetch(PDO::FETCH_ASSOC);
 if (!$trip) exit('Not found');
-// Approvers from circular by DeptCode
+
+// Approvers
 $approvers = [];
 if (!empty($trip['DeptCode'])) {
     try {
@@ -24,17 +27,16 @@ if (!empty($trip['DeptCode'])) {
     } catch (Exception $e) {
     }
 }
-while (count($approvers) < 5) {
-    $approvers[] = '';
-}
+while (count($approvers) < 5) $approvers[] = '';
+
 $proposalDate = !empty($trip['created_at']) ? strtotime($trip['created_at']) : time();
 $d = date('d', $proposalDate);
 $m = date('m', $proposalDate);
 $y = date('Y', $proposalDate);
+
 $hasSGD = (float)($trip['temp_payment_sgn'] ?? 0) > 0;
 $hasYEN = (float)($trip['temp_payment_yen'] ?? 0) > 0;
-// Registration number (if field exists else generate)
-$regNo = !empty($trip['registration_no']) ? $trip['registration_no'] : ('BT-' . str_pad($trip['id'], 5, '0', STR_PAD_LEFT) . '/' . $y);
+
 header('Content-Type: text/html; charset=utf-8');
 ?>
 <!doctype html>
@@ -44,185 +46,227 @@ header('Content-Type: text/html; charset=utf-8');
     <meta charset="utf-8">
     <title>Approval Of Business Trip #<?= $id ?></title>
     <style>
-        body {
-            font-family: Arial, Helvetica, sans-serif;
-            font-size: 11px;
-            margin: 4mm; /* tighter to fill page */
-            color: #000;
-        }
+        :root {
+            /* ==== gampang diatur ==== */
+            --page-margin-mm: 5mm;   /* kecilkan margin biar area konten makin luas */
+            --font-size: 11.2px;     /* sedikit lebih besar agar terlihat penuh */
+            --cell-pad-v: 4px;       /* padding vertikal */
+            --cell-pad-h: 4px;       /* padding horizontal */
 
-        table {
-            border-collapse: collapse;
-            width: 100%;
-        }
-
-        td,
-        th {
-            border: 1px solid #000;
-            padding: 3px 4px;
-            vertical-align: middle;
-            font-weight: normal;
-        }
-
-        .center {
-            text-align: center
-        }
-
-        .right {
-            text-align: right
-        }
-
-        .bold {
-            font-weight: bold
-        }
-
-        .shade {
-            background: #f2f2f2;
-        }
-
-        .shade2 {
-            background: #e8e8e8;
-        }
-
-        @media print {
-            .no-print {
-                display: none !important
-            }
-
-            body {
-                margin: 4mm; /* unify print margin with body for full width */
-                font-size: 10.8px; /* slight bump to better fill vertical space */
-            }
+            /* ==== tinggi bagian (mm) – naikin untuk “mengisi” ke bawah ==== */
+            --h-approvals: 25mm;     /* kotak tanda tangan Approval */
+            --h-purpose: 14mm;       /* area Purpose */
+            --h-period: 9mm;         /* baris Periode */
+            --h-temp-head: 9mm;      /* header Temporary Payment */
+            --h-temp-row: 9mm;       /* baris IDR/SGD/YEN */
+            --h-collection: 12mm;    /* Date Of Collection */
+            --temp-min-h: 58mm;      /* tinggi minimum blok Temporary Payment */
+            --push: 6mm;             /* FILLER opsional kalau masih ada sisa putih */
         }
 
         @page {
             size: A4 landscape;
-            margin: 5mm; /* reduced margin to maximize printable area */
+            margin: var(--page-margin-mm);
         }
+
+        body {
+            margin: var(--page-margin-mm);
+            font-family: Arial, Helvetica, sans-serif;
+            font-size: var(--font-size);
+            color: #000;
+        }
+
+        table { border-collapse: collapse; width: 100%; }
+
+        .middle-center { vertical-align: middle !important; text-align: center; }
+
+        td, th {
+            border: 1px solid #000;
+            padding: var(--cell-pad-v) var(--cell-pad-h);
+            vertical-align: middle;
+            line-height: 1.22;
+            font-weight: normal;
+        }
+
+        .center { text-align: center }
+        .right  { text-align: right }
+        .bold   { font-weight: bold }
+        .shade  { background: #f2f2f2 }
+        .shade2 { background: #e8e8e8 }
+        .no-print { display: inline-block }
+
+        .h-approvals { height: var(--h-approvals); }
+        .h-purpose   { height: var(--h-purpose); }
+        .h-period    { height: var(--h-period); }
+        .h-temp-head { height: var(--h-temp-head); }
+        .h-temp-row  { height: var(--h-temp-row); }
+        .h-collection{ height: var(--h-collection); }
+        .temp-wrapper{ min-height: var(--temp-min-h); }
+
+        /* Baris ekstra untuk memperpanjang Receiver/Signature tanpa mengubah grid kiri */
+        .tr-gap td{
+            border: 0 !important;
+            padding: 0 !important;
+            height: 8mm;            /* atur tinggi tambahan di sini */
+            line-height: 0;
+            font-size: 0;
+        }
+
+        /* Sel kosong tanpa border (buat ngisi kolom yang tidak ter-rowspan di baris tertentu) */
+        .no-border{
+            border: 0 !important;
+            padding: 0 !important;
+            border-right: 0 !important;
+        }
+
+        .no-border-right-left{
+            border-right: 0 !important;
+            border-left: 0 !important;
+        }
+
+        /* Filler opsional untuk “menyentuh” bagian paling bawah */
+        .push-bottom td {
+            border: 0;
+            padding: 0;
+            height: var(--push);
+        }
+
+        @media print { .no-print { display: none !important; } }
     </style>
 </head>
 
 <body>
     <button class="no-print" onclick="window.print()" style="float:right;margin:4px 0;">Print</button>
+
     <!-- Header Bar -->
-    <table style="margin-bottom:0;">
+    <table style="margin-bottom:0; font-size:14px;">
         <tr class="center bold">
-            <td style="width:33.3%">PT.Yoshikawa Electronics Bintan</td>
+            <td style="width:40.6%; height:8mm;">PT.Yoshikawa Electronics Bintan</td>
             <td style="width:33.3%">YBR-HRD065</td>
             <td style="width:33.3%">Initial</td>
         </tr>
     </table>
+
     <!-- Title Row with Registration Box on Right -->
     <table style="margin-bottom:4px;">
         <tr>
-            <td class="center bold" style="font-size:13px;" colspan="9">PT.YOSHIKAWA ELECTRONICS BINTAN&nbsp;&nbsp;Approval Of&nbsp;Business Trip</td>
-            <td style="width:180px;" class="shade" colspan="2">
+            <td class="center bold" style="font-size:14px;" colspan="9">
+                PT.YOSHIKAWA ELECTRONICS BINTAN&nbsp;&nbsp;Approval Of&nbsp;Business Trip
+            </td>
+            <td style="width:50px;" class="shade" colspan="2">
                 <table style="width:100%;border-collapse:collapse;">
-                    <tr>
-                        <td class="center" style="border:0;font-size:11px;">Registration Number</td>
-                    </tr>
-                    <tr style="text-align:center">
-                        <td style="border:0;font-size:11px ;">ID = <?= esc($trip['id']) ?></td>
-                    </tr>
+                    <tr><td class="center" style="border:0;font-size:12px;">Registration Number</td></tr>
+                    <tr style="text-align:center"><td style="border:0;font-size:12px;">ID = <?= esc($trip['id']) ?></td></tr>
                 </table>
             </td>
         </tr>
     </table>
+
     <!-- Proposal / Identification / Approvals -->
     <table style="margin-bottom:0;">
         <tr class="center">
-            <td style="width:90px;" class="shade">Proposal Date</td>
-            <td style="width:140px;" class="center" colspan="2"><?= $d . '/' . $m . '/' . $y ?></td>
+            <td style="width:65px; height:8mm;" class="shade">Proposal Date</td>
+            <td style="width:120px;" class="center" colspan="2"><?= $d . '/' . $m . '/' . $y ?></td>
 
+            <td style="width:65px; height:8mm;" class="shade">NIK</td>
+            <td style="width:60px;" class="center"><?= esc($trip['employee_empno']) ?></td>
 
-            <td style="width:80px;" class="shade">NIK</td>
-            <td style="width:70px;" class="center"><?= esc($trip['employee_empno']) ?></td>
+            <td style="width:70px; height:8mm;" colspan="2" class="shade">Name</td>
+            <td style="width:120px;" class="center" colspan="2"><?= esc($trip['employee_name']) ?></td>
 
-
-            <td style="width:60px;" colspan="2" class="shade">Name</td>
-            <td style="width:180px;" class="center" colspan="4"><?= esc($trip['employee_name']) ?></td>
-
-
-            <td style="width:90px;" class="shade">Signature</td>
+            <td style="width:100px; height:8mm;" class="shade">Signature</td>
+            <td style="width:80px;" colspan="2">&nbsp;</td>
         </tr>
+
         <tr>
-            <td rowspan="2" class="shade" style="width:90px;">Approval</td>
+            <td rowspan="2" class="shade middle-center" style="width:120px;">Approval</td>
             <?php foreach ($approvers as $ap): ?>
-                <td class="shade2 center" colspan="2" style="min-width:90px;"><?= esc($ap) ?></td>
+                <td class="shade center" colspan="2" style="width:65px; height:8mm;"><?= esc($ap) ?></td>
             <?php endforeach; ?>
-            <td class="center" colspan="2" style="min-width:90px;">&nbsp;</td>
+            <td class="center shade" colspan="1" style="width:120px;">&nbsp;</td>
         </tr>
-        <tr style="height:42px;">
+        <tr class="h-approvals">
             <?php foreach ($approvers as $ap): ?>
-                <td colspan="2">&nbsp;</td>
+                <td colspan="2" >&nbsp;</td>
             <?php endforeach; ?>
-            <td colspan="2">&nbsp;</td>
+            <td colspan="2" >&nbsp;</td>
         </tr>
     </table>
+
     <!-- Detail Fields -->
     <table style="margin-top:0;">
         <tr>
-            <td style="width:140px;" class="shade">Department / Section</td>
+            <td style="width:120px; height:8mm;" class="shade">Department / Section</td>
             <td colspan="10"><?= esc($trip['DeptCode'] ?: '-') ?></td>
         </tr>
         <tr>
-            <td class="shade">Destination</td>
+            <td style="height:8mm;" class="shade">Destination</td>
             <td colspan="10"><?= esc($trip['tujuan'] ?: '-') ?></td>
         </tr>
         <tr>
-            <td class="shade">Destination Company Name</td>
+            <td style="height:8mm;" class="shade">Destination Company Name</td>
             <td colspan="10"><?= esc($trip['destination_company'] ?: '-') ?></td>
         </tr>
         <tr>
-            <td class="shade">Purpose</td>
-            <td colspan="10" style="height:38px;"><?= esc($trip['purpose'] ?: '-') ?></td>
+            <td style="height:8mm;" class="shade">Purpose</td>
+            <td colspan="10"><?= esc($trip['purpose'] ?: '-') ?></td>
         </tr>
-        <tr>
+
+        <tr class="h-period">
             <td class="shade" rowspan="1">Periode</td>
-            <td class="shade center" style="width:60px;">From</td>
-            <td style="width:110px;" class="center"><?= $trip['period_from'] ? date('d/m/Y', strtotime($trip['period_from'])) : '' ?></td>
-            <td class="shade center" style="width:35px;">To</td>
-            <td style="width:110px;" class="center"><?= $trip['period_to'] ? date('d/m/Y', strtotime($trip['period_to'])) : '' ?></td>
+            <td class="shade center" style="width:70px;">From</td>
+            <td style="width:120px;" class="center"><?= $trip['period_from'] ? date('d/m/Y', strtotime($trip['period_from'])) : '' ?></td>
+            <td class="shade center" style="width:45px;">To</td>
+            <td style="width:120px;" class="center"><?= $trip['period_to'] ? date('d/m/Y', strtotime($trip['period_to'])) : '' ?></td>
             <td colspan="6"></td>
         </tr>
     </table>
-    <!-- Temporary Payment Section (separate table) -->
-    <table style="margin-top:4px;">
-        <tr class="shade small center">
-            <td style="width:110px;">Temporary Payment</td>
-            <td style="width:130px;" class="shade">Amount Of Application</td>
-            <td style="width:60px;" class="shade">Currency</td>
-            <td style="width:200px;" class="shade">Amount</td>
-            <td style="width:200px;" class="shade">Receiver</td>
-            <td style="width:150px;" class="shade">Signature</td>
-        </tr>
-        <tr>
-            <td rowspan="4"></td>
-            <td rowspan="4" class="center"></td>
-            <td class="shade center small">IDR</td>
-            <td><?= $trip['temp_payment_idr'] ? number_format($trip['temp_payment_idr'], 0, ',', '.') : '&nbsp;' ?></td>
-            <td rowspan="4"></td>
-            <td rowspan="4"></td>
-        </tr>
-        <tr>
-            <td class="shade center small">SGD</td>
-            <td>&nbsp;<?= $hasSGD ? number_format($trip['temp_payment_sgn'], 0, ',', '.') : '' ?></td>
-        </tr>
-        <tr>
-            <td class="shade center small">YEN</td>
-            <td>&nbsp;<?= $hasYEN ? number_format($trip['temp_payment_yen'], 0, ',', '.') : '' ?></td>
-        </tr>
-        <tr>
-            <td class="shade center small">&nbsp;</td>
-            <td>&nbsp;</td>
-        </tr>
-        <tr>
-            <td></td>
-            <td class="small">Date Of Collection</td>
-            <td colspan="3"></td>
-            <td></td>
-        </tr>
-    </table>
-</body>
 
+    <!-- Temporary Payment Section -->
+    <div class="temp-wrapper">
+        <table style="margin-top:4px;">
+            <tr class="shade center h-temp-head">
+                <td class="shade middle-center" rowspan="7" style="width:107px;">Temporary Payment</td>
+                <td class="shade middle-center" rowspan="5" style="width:130px;">Amount Of Application</td>
+                <td style="width:60px;"  class="shade">Currency</td>
+                <td style="width:200px;" class="shade">Amount</td>
+                <td style="width:200px;" class="shade">Receiver</td>
+                <td style="width:200px;" class="shade">Signature</td>
+            </tr>
+
+            <!-- 1) IDR -->
+            <tr class="h-temp-row">
+                <td class="shade center">IDR</td>
+                <td><?= $trip['temp_payment_idr'] ? number_format($trip['temp_payment_idr'], 0, ',', '.') : '&nbsp;' ?></td>
+                <td rowspan="5"></td>
+                <td rowspan="5"></td>
+            </tr>
+
+            <!-- 2) SGD -->
+            <tr class="h-temp-row">
+                <td class="shade center">SGD</td>
+                <td>&nbsp;<?= $hasSGD ? number_format($trip['temp_payment_sgn'], 0, ',', '.') : '' ?></td>
+            </tr>
+
+            <!-- 3) YEN -->
+            <tr class="h-temp-row">
+                <td class="shade center">YEN</td>
+                <td>&nbsp;<?= $hasYEN ? number_format($trip['temp_payment_yen'], 0, ',', '.') : '' ?></td>
+            </tr>
+
+            <!-- 4) baris kosong (tetap dihitung ke rowspan) -->
+            <tr class="h-temp-row">
+                <td class="shade center"></td>
+                <td></td>
+            </tr>
+
+            <tr class="h-collection">
+                <td class="small shade" >Date Of Collection</td>
+
+                <td class="no-border-right-left"></td>
+                <td class="no-border-right-left"></td>
+            </tr>
+        </table>
+    </div>
+</body>
 </html>
