@@ -40,9 +40,9 @@ if ($user['role'] === 'employee'):
               <a class="btn btn-primary btn-modern btn-lg px-4 me-2" href="index.php?page=trips/create">
                 <i class="fas fa-plus me-2"></i>Create New Trip Request
               </a>
-              <a class="btn btn-outline-secondary btn-modern btn-lg px-4" href="index.php?page=trips/index">
+              <!-- <a class="btn btn-outline-secondary btn-modern btn-lg px-4" href="index.php?page=trips/index">
                 <i class="fas fa-list me-2"></i>View My Trips
-              </a>
+              </a> -->
             </div>
           </div>
         </div>

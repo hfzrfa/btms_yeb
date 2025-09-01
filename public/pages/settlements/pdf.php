@@ -26,7 +26,7 @@ $stmt = $pdo->prepare(
    FROM settlements s
    LEFT JOIN trips t ON t.id = s.trip_id
    LEFT JOIN employees e ON e.id = t.employee_id
-   WHERE s.id = ?"
+    WHERE s.id = ?"
 );
 $stmt->execute([$id]);
 $settle = $stmt->fetch(PDO::FETCH_ASSOC);
@@ -59,6 +59,39 @@ try {
     }
 } catch (Throwable $e) { /* ignore */
 }
+
+// Resolusi Department / Section berdasarkan DeptCode (format: code / name[, section])
+$deptDisplay = '-';
+try {
+    $deptCode = trim((string)($settle['DeptCode'] ?? ''));
+    if ($deptCode !== '') {
+        $deptDisplay = $deptCode; // default ke kode
+        // Deteksi kolom di tabel departments
+        $cols = $pdo->query('SHOW COLUMNS FROM departments')->fetchAll(PDO::FETCH_COLUMN, 0);
+        $lower = array_map('strtolower', $cols);
+        $map = array_combine($lower, $cols);
+        $nameCandidates = ['deptname','name','description','dept_desc','deptdesc','dept_name'];
+        $secCandidates  = ['sectionname','section','section_name'];
+        $codeCandidates = ['deptcode','dept_code','code'];
+        $nameCol = null; $secCol = null; $codeCol = null;
+        foreach ($nameCandidates as $c) { if (isset($map[$c])) { $nameCol = $map[$c]; break; } }
+        foreach ($secCandidates as $c)  { if (isset($map[$c])) { $secCol  = $map[$c]; break; } }
+        foreach ($codeCandidates as $c) { if (isset($map[$c])) { $codeCol = $map[$c]; break; } }
+        $select = ($codeCol ? ('`'.$codeCol.'`') : 'DeptCode') . ' AS code';
+        if ($nameCol) $select .= ', `'.$nameCol.'` AS dname';
+        if ($secCol)  $select .= ', `'.$secCol.'` AS sname';
+        $whereCol = $codeCol ? ('`'.$codeCol.'`') : 'DeptCode';
+        $sql = "SELECT $select FROM departments WHERE $whereCol = ? LIMIT 1";
+        $s = $pdo->prepare($sql);
+        $s->execute([$deptCode]);
+        if ($row = $s->fetch(PDO::FETCH_ASSOC)) {
+            $code = $row['code'] ?? $deptCode;
+            $name = $row['dname'] ?? '';
+            $sec  = $row['sname'] ?? '';
+            $deptDisplay = trim($code . ' / ' . $name . ($sec !== '' ? ', ' . $sec : ''));
+        }
+    }
+} catch (Throwable $e) { /* ignore, fallback ke kode */ }
 
 // Tambah kolom jika belum ada (toleran)
 try {
@@ -104,6 +137,7 @@ $categories = [
     'Taxi 5',
     'Other',
     'Daily Allowance',
+
     'Accommodation' // di form tertulis "Accomodation" — dibiarkan meniru
 ];
 
@@ -139,7 +173,7 @@ header('Content-Type: text/html; charset=utf-8');
 
 <head>
     <meta charset="utf-8">
-    <title>Calculation of Business Trip Expense #<?= (int)$id ?></title>
+    <title>Calculation of Business Trip Expense #<?= (int)$id ?><?= isset($settle['reg_no']) && $settle['reg_no'] ? ' / Reg ' . $settle['reg_no'] : '' ?></title>
     <style>
         @page {
             size: A4 portrait;
@@ -377,13 +411,13 @@ header('Content-Type: text/html; charset=utf-8');
 
             <!-- Name -->
             <td class="name-lbl center shade">Name</td>
-            <td style="width:60px;" class="center no-border-right"><?= $settle['emp_no'] ? esc($settle['emp_no']) : '&nbsp;' ?></td>
+            <td style="width:70px;" class=""><?= $settle['emp_no'] ? esc($settle['emp_no']) : '&nbsp;' ?>  </td>
             <td class="no-border-left" colspan="4"><?= $settle['emp_name'] ? esc($settle['emp_name']) : '&nbsp;' ?></td>
 
         </tr>
         <tr>
-            <td class="label shade">Department</td>
-            <td colspan="4"><?= esc($settle['DeptCode'] ?: '-') ?></td>
+            <td class="label shade">Department / Section</td>
+            <td colspan="4"><?= esc($deptDisplay) ?></td>
 
             <td class="center shade" style="width: 190px;">POSITION</td>
             <td class="pos-val" colspan="2"><?= $positionName ? esc($positionName) : '' ?></td>
@@ -413,8 +447,8 @@ header('Content-Type: text/html; charset=utf-8');
     <table>
         <tr class="exp-head center shade">
             <td class="exp-type shade">Type Of Expenses</td>
-            <td class="exp-rp">RP</td>
-            <td class="exp-sgd">SIN ($)</td>
+            <td class="exp-rp">IDR</td>
+            <td class="exp-sgd">SGD</td>
             <td class="exp-yen">YEN</td>
             <td>Description</td>
         </tr>
@@ -446,8 +480,8 @@ header('Content-Type: text/html; charset=utf-8');
         <tr>
             <td class="shade">Temporary Payment</td>
             <td class="right"><?= number_format($advance, 0, ',', '.') ?></td>
-            <td class="right"><?= $advance_sgd ? number_format($advance_sgd, 2, '.', ',') : '' ?></td>
-            <td class="right"><?= $advance_yen ? number_format($advance_yen, 0, ',', '.') : '' ?></td>
+            <td class="right"></td>
+            <td class="right"></td>
             <td></td>
         </tr>
 
@@ -478,13 +512,14 @@ header('Content-Type: text/html; charset=utf-8');
         <tr>
             <td style="width:220px;" class="shade">Circulation *Used When US$ etc converted into S$ / RP.</td>
             <td style="width: 340px;"></td>
-            <td style="min-width:300px;" class="center shade">Signature</td>
-            <td style="width: 300px;"></td>
+            <td colspan="3"></td>
         </tr>
 
         <tr>
             <td style="width:190px;" class="shade">Day Of Payment</td>
             <td></td>
+            <td style="min-width:300px;" class="center shade">Signature</td>
+
             <td colspan="2"></td>
         </tr>
     </table>
@@ -492,14 +527,15 @@ header('Content-Type: text/html; charset=utf-8');
     <!-- Signature grid bawah -->
     <table class="sign-hdr center">
         <tr>
-            <td style="width:110px;">Claim by</td>
-            <td style="width:120px;">Concerned<br>Asst.Manager</td>
-            <td style="width:120px;">Concerned<br>Manager</td>
-            <td style="width:120px;">Concerned GM</td>
-            <td style="width:120px;">Calculated by<br>HR</td>
-            <td style="width:120px;">HR Manager</td>
-            <td style="width:120px;">Financial Advisor<br>Takimoto</td>
-            <td style="width:120px;">Financial Advisor<br>Muramoto</td>
+            <td style="width: 120px;">Claim by</td>
+            <td style="width: 120px;">Concerned<br>Asst. Manager</td>
+            <td style="width: 120px;">Concerned<br>Manager</td>
+            <td style="width: 120px;">Concerned GM</td>
+            <td style="width: 120px;">Calculated by<br>HR</td>
+            <td style="width: 120px;">HR Manager</td>
+            <td style="width: 120px;">Financial Advisor</td>
+
+
         </tr>
         <tr class="sign-grid" style="height: 130px;">
             <td></td>

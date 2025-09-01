@@ -1,13 +1,13 @@
 <?php
 require_role('admin');
 $pdo = getPDO();
-if ($_SERVER['REQUEST_METHOD']==='POST' && verify_csrf()) {
-    if (post('action')==='create') {
-  $pdo->prepare('INSERT INTO `groups`(name) VALUES(?)')->execute([trim(post('name'))]);
-    } elseif (post('action')==='delete') {
-  $pdo->prepare('DELETE FROM `groups` WHERE id=?')->execute([post('id')]);
-    }
-    redirect('index.php?page=masters/group');
+if ($_SERVER['REQUEST_METHOD'] === 'POST' && verify_csrf()) {
+  if (post('action') === 'create') {
+    $pdo->prepare('INSERT INTO `groups`(name) VALUES(?)')->execute([trim(post('name'))]);
+  } elseif (post('action') === 'delete') {
+    $pdo->prepare('DELETE FROM `groups` WHERE id=?')->execute([post('id')]);
+  }
+  redirect('index.php?page=masters/group');
 }
 $rows = $pdo->query('SELECT * FROM `groups` ORDER BY name')->fetchAll();
 ?>
@@ -19,20 +19,25 @@ $rows = $pdo->query('SELECT * FROM `groups` ORDER BY name')->fetchAll();
   <div class="col-auto"><button class="btn btn-primary">Add</button></div>
 </form>
 <table class="table table-sm table-bordered datatable">
-  <thead><tr><th>Name</th><th width=80>Action</th></tr></thead>
-  <tbody>
-  <?php foreach($rows as $r): ?>
+  <thead>
     <tr>
-      <td><?= esc($r['name']) ?></td>
-      <td>
-        <form method="post" onsubmit="return confirm('Delete?')" class="d-inline">
-          <?= csrf_field(); ?>
-          <input type="hidden" name="action" value="delete">
-          <input type="hidden" name="id" value="<?= $r['id'] ?>">
-          <button class="btn btn-danger btn-sm">Del</button>
-        </form>
-      </td>
+      <th>Name</th>
+      <th width=80>Action</th>
     </tr>
-  <?php endforeach; ?>
+  </thead>
+  <tbody>
+    <?php foreach ($rows as $r): ?>
+      <tr>
+        <td><?= esc($r['name']) ?></td>
+        <td>
+          <form method="post" onsubmit="return confirm('Delete?')" class="d-inline">
+            <?= csrf_field(); ?>
+            <input type="hidden" name="action" value="delete">
+            <input type="hidden" name="id" value="<?= $r['id'] ?>">
+            <button class="btn btn-danger btn-sm">Del</button>
+          </form>
+        </td>
+      </tr>
+    <?php endforeach; ?>
   </tbody>
 </table>

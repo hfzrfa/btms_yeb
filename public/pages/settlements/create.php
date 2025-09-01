@@ -5,12 +5,40 @@ $pdo = getPDO();
 try {
   $col = $pdo->query("SHOW COLUMNS FROM settlements LIKE 'id'")->fetch(PDO::FETCH_ASSOC);
   if ($col && stripos(($col['Extra'] ?? ''), 'auto_increment') === false) {
-    try { $hasPk = $pdo->query("SHOW INDEX FROM settlements WHERE Key_name='PRIMARY'")->fetch(); if(!$hasPk){ $pdo->exec("ALTER TABLE settlements ADD PRIMARY KEY (id)"); } } catch(Throwable $e) {}
-    try { $pdo->exec("ALTER TABLE settlements MODIFY id INT NOT NULL AUTO_INCREMENT"); } catch(Throwable $e) {}
-    try { $next = (int)$pdo->query("SELECT MAX(id)+1 FROM settlements")->fetchColumn(); if($next<1) $next=1; $pdo->exec("ALTER TABLE settlements AUTO_INCREMENT=".$next); } catch(Throwable $e) {}
+    try {
+      $hasPk = $pdo->query("SHOW INDEX FROM settlements WHERE Key_name='PRIMARY'")->fetch();
+      if (!$hasPk) {
+        $pdo->exec("ALTER TABLE settlements ADD PRIMARY KEY (id)");
+      }
+    } catch (Throwable $e) {
+    }
+    try {
+      $pdo->exec("ALTER TABLE settlements MODIFY id INT NOT NULL AUTO_INCREMENT");
+    } catch (Throwable $e) {
+    }
+    try {
+      $next = (int)$pdo->query("SELECT MAX(id)+1 FROM settlements")->fetchColumn();
+      if ($next < 1) $next = 1;
+      $pdo->exec("ALTER TABLE settlements AUTO_INCREMENT=" . $next);
+    } catch (Throwable $e) {
+    }
   }
-} catch (Throwable $e) { /* ignore */ }
+} catch (Throwable $e) { /* ignore */
+}
 $user = current_user();
+// Ensure reg_no columns/tables exist for stable registration number flow
+try {
+  $pdo->exec("ALTER TABLE trips ADD COLUMN reg_no INT NULL");
+} catch (Throwable $e) {
+}
+try {
+  $pdo->exec("ALTER TABLE settlements ADD COLUMN reg_no INT NULL");
+} catch (Throwable $e) {
+}
+try {
+  $pdo->exec("CREATE TABLE IF NOT EXISTS trip_registrations (id INT NOT NULL AUTO_INCREMENT PRIMARY KEY, created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP)");
+} catch (Throwable $e) {
+}
 // Trips approved & not yet settled
 if ($user['role'] === 'employee') {
   $stmt = $pdo->prepare('SELECT t.id, t.tujuan, t.tanggal, t.temp_payment_idr, t.temp_payment_sgn, t.temp_payment_yen FROM trips t LEFT JOIN settlements s ON s.trip_id=t.id WHERE t.employee_id=? AND t.status="approved" AND s.id IS NULL ORDER BY t.tanggal DESC');
@@ -32,6 +60,27 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && verify_csrf()) {
     $total_idr = $used_amount;
     $variance = $total_idr - $advance_idr; // positive = company owes employee
     $remaining_cash = max($advance_idr - $total_idr, 0);
+    // Fetch reg_no from trip (generate if missing)
+    $regNoTrip = null;
+    try {
+      $stReg = $pdo->prepare('SELECT reg_no FROM trips WHERE id=?');
+      $stReg->execute([$trip_id]);
+      $regNoTrip = (int)$stReg->fetchColumn();
+    } catch (Throwable $e) {
+    }
+    if (!$regNoTrip) {
+      try {
+        $pdo->exec("INSERT INTO trip_registrations() VALUES()");
+        $regNoTrip = (int)$pdo->lastInsertId();
+      } catch (Throwable $e) {
+      }
+      if ($regNoTrip) {
+        try {
+          $pdo->prepare('UPDATE trips SET reg_no=? WHERE id=?')->execute([$regNoTrip, $trip_id]);
+        } catch (Throwable $e) {
+        }
+      }
+    }
     // Receipts handling (optional)
     $fileNames = [];
     if (!empty($_FILES['receipts']['name'][0])) {
@@ -49,24 +98,47 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && verify_csrf()) {
     } catch (Exception $e) {
     }
     try {
-      $pdo->prepare('INSERT INTO settlements(trip_id,total_realisasi,bukti_file,variance,status,remaining_cash,created_at) VALUES(?,?,?,?,?,?,NOW())')
-        ->execute([$trip_id, $total_idr, implode('|', $fileNames), $variance, 'submitted', $remaining_cash]);
+      $pdo->prepare('INSERT INTO settlements(trip_id,reg_no,total_realisasi,bukti_file,variance,status,remaining_cash,created_at) VALUES(?,?,?,?,?,?,?,NOW())')
+        ->execute([$trip_id, $regNoTrip ?: null, $total_idr, implode('|', $fileNames), $variance, 'submitted', $remaining_cash]);
     } catch (Throwable $e) {
       // Fallback for tables without AUTO_INCREMENT on id
       if (strpos($e->getMessage(), '1364') !== false || stripos($e->getMessage(), "doesn't have a default value") !== false) {
-        try { $next = (int)$pdo->query('SELECT COALESCE(MAX(id),0)+1 FROM settlements')->fetchColumn(); if($next<1) $next=1; } catch(Throwable $e2){ $next=1; }
-        $pdo->prepare('INSERT INTO settlements(id,trip_id,total_realisasi,bukti_file,variance,status,remaining_cash,created_at) VALUES(?,?,?,?,?,?,?,NOW())')
-            ->execute([$next, $trip_id, $total_idr, implode('|', $fileNames), $variance, 'submitted', $remaining_cash]);
-      } else { throw $e; }
+        try {
+          $next = (int)$pdo->query('SELECT COALESCE(MAX(id),0)+1 FROM settlements')->fetchColumn();
+          if ($next < 1) $next = 1;
+        } catch (Throwable $e2) {
+          $next = 1;
+        }
+        $pdo->prepare('INSERT INTO settlements(id,trip_id,reg_no,total_realisasi,bukti_file,variance,status,remaining_cash,created_at) VALUES(?,?,?,?,?,?,?,?,NOW())')
+          ->execute([$next, $trip_id, $regNoTrip ?: null, $total_idr, implode('|', $fileNames), $variance, 'submitted', $remaining_cash]);
+      } else {
+        throw $e;
+      }
     }
     redirect('index.php?page=settlements/index');
   }
   // Detailed / modal mode (multi-currency capable)
   $items = json_decode(post('items_json') ?? '[]', true) ?: [];
   // Fetch trip currencies to derive implicit rates (IDR per foreign)
-  $trip = $pdo->prepare('SELECT temp_payment_idr,temp_payment_sgn,temp_payment_yen FROM trips WHERE id=?');
+  $trip = $pdo->prepare('SELECT temp_payment_idr,temp_payment_sgn,temp_payment_yen, reg_no FROM trips WHERE id=?');
   $trip->execute([$trip_id]);
-  $tripRow = $trip->fetch(PDO::FETCH_ASSOC) ?: ['temp_payment_idr' => 0, 'temp_payment_sgn' => 0, 'temp_payment_yen' => 0];
+  $tripRow = $trip->fetch(PDO::FETCH_ASSOC) ?: ['temp_payment_idr' => 0, 'temp_payment_sgn' => 0, 'temp_payment_yen' => 0, 'reg_no' => null];
+  if (empty($tripRow['reg_no'])) {
+    // Generate and persist reg_no if missing
+    try {
+      $pdo->exec("INSERT INTO trip_registrations() VALUES()");
+      $newReg = (int)$pdo->lastInsertId();
+    } catch (Throwable $e) {
+      $newReg = null;
+    }
+    if ($newReg) {
+      try {
+        $pdo->prepare('UPDATE trips SET reg_no=? WHERE id=?')->execute([$newReg, $trip_id]);
+      } catch (Throwable $e) {
+      }
+      $tripRow['reg_no'] = $newReg;
+    }
+  }
   $adv_idr_full = (float)($tripRow['temp_payment_idr'] ?? 0);
   $adv_sgd_full = (float)($tripRow['temp_payment_sgn'] ?? 0);
   $adv_yen_full = (float)($tripRow['temp_payment_yen'] ?? 0);
@@ -107,15 +179,22 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && verify_csrf()) {
   }
   $usedManualId = null;
   try {
-    $pdo->prepare('INSERT INTO settlements(trip_id,total_realisasi,bukti_file,variance,status,remaining_cash,created_at) VALUES(?,?,?,?,?,?,NOW())')
-      ->execute([$trip_id, $total_idr, implode('|', $fileNames), $variance, 'submitted', $remaining_cash]);
+    $pdo->prepare('INSERT INTO settlements(trip_id,reg_no,total_realisasi,bukti_file,variance,status,remaining_cash,created_at) VALUES(?,?,?,?,?,?,?,NOW())')
+      ->execute([$trip_id, $tripRow['reg_no'] ?? null, $total_idr, implode('|', $fileNames), $variance, 'submitted', $remaining_cash]);
   } catch (Throwable $e) {
     if (strpos($e->getMessage(), '1364') !== false || stripos($e->getMessage(), "doesn't have a default value") !== false) {
-      try { $next = (int)$pdo->query('SELECT COALESCE(MAX(id),0)+1 FROM settlements')->fetchColumn(); if($next<1) $next=1; } catch(Throwable $e2){ $next=1; }
+      try {
+        $next = (int)$pdo->query('SELECT COALESCE(MAX(id),0)+1 FROM settlements')->fetchColumn();
+        if ($next < 1) $next = 1;
+      } catch (Throwable $e2) {
+        $next = 1;
+      }
       $usedManualId = $next;
-      $pdo->prepare('INSERT INTO settlements(id,trip_id,total_realisasi,bukti_file,variance,status,remaining_cash,created_at) VALUES(?,?,?,?,?,?,?,NOW())')
-          ->execute([$next, $trip_id, $total_idr, implode('|', $fileNames), $variance, 'submitted', $remaining_cash]);
-    } else { throw $e; }
+      $pdo->prepare('INSERT INTO settlements(id,trip_id,reg_no,total_realisasi,bukti_file,variance,status,remaining_cash,created_at) VALUES(?,?,?,?,?,?,?,?,NOW())')
+        ->execute([$next, $trip_id, $tripRow['reg_no'] ?? null, $total_idr, implode('|', $fileNames), $variance, 'submitted', $remaining_cash]);
+    } else {
+      throw $e;
+    }
   }
   try {
     $pdo->exec("CREATE TABLE IF NOT EXISTS settlement_items (id INT AUTO_INCREMENT PRIMARY KEY, settlement_id INT, category VARCHAR(50), description VARCHAR(255), amount_idr DECIMAL(15,2), amount_sgd DECIMAL(15,2) NULL, amount_yen DECIMAL(15,2) NULL, created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP)");
@@ -125,18 +204,35 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && verify_csrf()) {
   try {
     $col = $pdo->query("SHOW COLUMNS FROM settlement_items LIKE 'id'")->fetch(PDO::FETCH_ASSOC);
     if ($col && stripos(($col['Extra'] ?? ''), 'auto_increment') === false) {
-      try { $hasPk = $pdo->query("SHOW INDEX FROM settlement_items WHERE Key_name='PRIMARY'")->fetch(); if(!$hasPk){ $pdo->exec("ALTER TABLE settlement_items ADD PRIMARY KEY (id)"); } } catch(Throwable $e) {}
-      try { $pdo->exec("ALTER TABLE settlement_items MODIFY id INT NOT NULL AUTO_INCREMENT"); } catch(Throwable $e) {}
-      try { $next = (int)$pdo->query("SELECT MAX(id)+1 FROM settlement_items")->fetchColumn(); if($next<1) $next=1; $pdo->exec("ALTER TABLE settlement_items AUTO_INCREMENT=".$next); } catch(Throwable $e) {}
+      try {
+        $hasPk = $pdo->query("SHOW INDEX FROM settlement_items WHERE Key_name='PRIMARY'")->fetch();
+        if (!$hasPk) {
+          $pdo->exec("ALTER TABLE settlement_items ADD PRIMARY KEY (id)");
+        }
+      } catch (Throwable $e) {
+      }
+      try {
+        $pdo->exec("ALTER TABLE settlement_items MODIFY id INT NOT NULL AUTO_INCREMENT");
+      } catch (Throwable $e) {
+      }
+      try {
+        $next = (int)$pdo->query("SELECT MAX(id)+1 FROM settlement_items")->fetchColumn();
+        if ($next < 1) $next = 1;
+        $pdo->exec("ALTER TABLE settlement_items AUTO_INCREMENT=" . $next);
+      } catch (Throwable $e) {
+      }
     }
-  } catch (Throwable $e) { /* ignore */ }
+  } catch (Throwable $e) { /* ignore */
+  }
   // Ensure new columns exist (idempotent)
   try {
     $pdo->exec('ALTER TABLE settlement_items ADD COLUMN amount_sgd DECIMAL(15,2) NULL, ADD COLUMN amount_yen DECIMAL(15,2) NULL');
   } catch (Exception $e) {
   }
   $settleId = (int)$pdo->lastInsertId();
-  if(!$settleId && $usedManualId){ $settleId = (int)$usedManualId; }
+  if (!$settleId && $usedManualId) {
+    $settleId = (int)$usedManualId;
+  }
   $ins = $pdo->prepare('INSERT INTO settlement_items(settlement_id,category,description,amount_idr,amount_sgd,amount_yen) VALUES (?,?,?,?,?,?)');
   foreach ($items as $it) {
     try {
@@ -144,10 +240,17 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && verify_csrf()) {
     } catch (Throwable $e) {
       if (strpos($e->getMessage(), '1364') !== false || stripos($e->getMessage(), "doesn't have a default value") !== false) {
         // fallback insert with explicit id for settlement_items
-        try { $nextIt = (int)$pdo->query('SELECT COALESCE(MAX(id),0)+1 FROM settlement_items')->fetchColumn(); if($nextIt<1) $nextIt=1; } catch(Throwable $e2){ $nextIt=1; }
+        try {
+          $nextIt = (int)$pdo->query('SELECT COALESCE(MAX(id),0)+1 FROM settlement_items')->fetchColumn();
+          if ($nextIt < 1) $nextIt = 1;
+        } catch (Throwable $e2) {
+          $nextIt = 1;
+        }
         $pdo->prepare('INSERT INTO settlement_items(id,settlement_id,category,description,amount_idr,amount_sgd,amount_yen) VALUES (?,?,?,?,?,?,?)')
-            ->execute([$nextIt, $settleId, $it['category'] ?? '', substr($it['description'] ?? '', 0, 255), (float)($it['amount_idr'] ?? 0), (float)($it['amount_sgd'] ?? 0), (float)($it['amount_yen'] ?? 0)]);
-      } else { throw $e; }
+          ->execute([$nextIt, $settleId, $it['category'] ?? '', substr($it['description'] ?? '', 0, 255), (float)($it['amount_idr'] ?? 0), (float)($it['amount_sgd'] ?? 0), (float)($it['amount_yen'] ?? 0)]);
+      } else {
+        throw $e;
+      }
     }
   }
   redirect('index.php?page=settlements/index');

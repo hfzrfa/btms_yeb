@@ -30,6 +30,10 @@ try {
 }
 $user = current_user();
 
+// Ensure trips.reg_no exists and a simple sequence table for stable registration numbers
+try { $pdo->exec("ALTER TABLE trips ADD COLUMN reg_no INT NULL"); } catch (Throwable $e) {}
+try { $pdo->exec("CREATE TABLE IF NOT EXISTS trip_registrations (id INT NOT NULL AUTO_INCREMENT PRIMARY KEY, created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP)"); } catch (Throwable $e) {}
+
 // Unified dropdown (searchable) always includes LOCAL employees from employees table.
 // Japan employees pulled from japanemployees (preferred) or employees_japan if available.
 // employeemaster (if exists) only used for better name/DeptCode correction, not to exclude locals.
@@ -52,70 +56,166 @@ try {
 } catch (Exception $e) { /* ignore if table missing */
 }
 // Build designation description maps for Position field
-$empColsLower = [];$hasEmpDest=false;$hasEmpDesignationId=false;
-try { $empColsLower = array_map('strtolower',$pdo->query("DESCRIBE employees")->fetchAll(PDO::FETCH_COLUMN,0)); } catch(Exception $e){}
-if($empColsLower){ $hasEmpDest = in_array('destcode',$empColsLower,true); $hasEmpDesignationId = in_array('designation_id',$empColsLower,true); }
+$empColsLower = [];
+$hasEmpDest = false;
+$hasEmpDesignationId = false;
+try {
+  $empColsLower = array_map('strtolower', $pdo->query("DESCRIBE employees")->fetchAll(PDO::FETCH_COLUMN, 0));
+} catch (Exception $e) {
+}
+if ($empColsLower) {
+  $hasEmpDest = in_array('destcode', $empColsLower, true);
+  $hasEmpDesignationId = in_array('designation_id', $empColsLower, true);
+}
 $designationById = [];
 $designationByCode = [];
 // Prefer desigcode table (maps code->Description)
 try {
   $hasDesig = (bool)$pdo->query("SHOW TABLES LIKE 'desigcode'")->fetch();
-  if($hasDesig){
-    try { foreach($pdo->query("SELECT DesigCode AS code, Description FROM desigcode") as $r){ if($r['code']!==''){ $designationByCode[$r['code']] = $r['Description'] ?: $r['code']; } } }
-    catch(Throwable $ie){ try { foreach($pdo->query("SELECT Code AS code, Description FROM desigcode") as $r){ if($r['code']!==''){ $designationByCode[$r['code']] = $r['Description'] ?: $r['code']; } } } catch(Throwable $ie2){} }
+  if ($hasDesig) {
+    try {
+      foreach ($pdo->query("SELECT DesigCode AS code, Description FROM desigcode") as $r) {
+        if ($r['code'] !== '') {
+          $designationByCode[$r['code']] = $r['Description'] ?: $r['code'];
+        }
+      }
+    } catch (Throwable $ie) {
+      try {
+        foreach ($pdo->query("SELECT Code AS code, Description FROM desigcode") as $r) {
+          if ($r['code'] !== '') {
+            $designationByCode[$r['code']] = $r['Description'] ?: $r['code'];
+          }
+        }
+      } catch (Throwable $ie2) {
+      }
+    }
   }
-} catch(Exception $e){}
+} catch (Exception $e) {
+}
 // designations table fallback (id/code -> description/name)
 try {
   $hasDesignations = (bool)$pdo->query("SHOW TABLES LIKE 'designations'")->fetch();
-  if($hasDesignations){
-    $dcols = $pdo->query('SHOW COLUMNS FROM designations')->fetchAll(PDO::FETCH_COLUMN,0);
-    $hasCode = in_array('code',$dcols,true);
-    $hasDesc = in_array('description',$dcols,true);
-    if($hasDesc){ foreach($pdo->query("SELECT id, description FROM designations") as $r){ $designationById[(int)$r['id']] = (string)$r['description']; } }
-    else { foreach($pdo->query("SELECT id, name FROM designations") as $r){ $designationById[(int)$r['id']] = (string)$r['name']; } }
-    if($hasCode){
-      if($hasDesc){ foreach($pdo->query("SELECT code, description FROM designations") as $r){ if($r['code']!==''){ $designationByCode[$r['code']] = $r['description'] ?: ($designationByCode[$r['code']] ?? $r['code']); } } }
-      else { foreach($pdo->query("SELECT code, name FROM designations") as $r){ if($r['code']!==''){ $designationByCode[$r['code']] = $r['name'] ?: ($designationByCode[$r['code']] ?? $r['code']); } } }
+  if ($hasDesignations) {
+    $dcols = $pdo->query('SHOW COLUMNS FROM designations')->fetchAll(PDO::FETCH_COLUMN, 0);
+    $hasCode = in_array('code', $dcols, true);
+    $hasDesc = in_array('description', $dcols, true);
+    if ($hasDesc) {
+      foreach ($pdo->query("SELECT id, description FROM designations") as $r) {
+        $designationById[(int)$r['id']] = (string)$r['description'];
+      }
     } else {
-      foreach($pdo->query("SELECT name FROM designations") as $r){ $designationByCode[$r['name']] = $r['name']; }
+      foreach ($pdo->query("SELECT id, name FROM designations") as $r) {
+        $designationById[(int)$r['id']] = (string)$r['name'];
+      }
+    }
+    if ($hasCode) {
+      if ($hasDesc) {
+        foreach ($pdo->query("SELECT code, description FROM designations") as $r) {
+          if ($r['code'] !== '') {
+            $designationByCode[$r['code']] = $r['description'] ?: ($designationByCode[$r['code']] ?? $r['code']);
+          }
+        }
+      } else {
+        foreach ($pdo->query("SELECT code, name FROM designations") as $r) {
+          if ($r['code'] !== '') {
+            $designationByCode[$r['code']] = $r['name'] ?: ($designationByCode[$r['code']] ?? $r['code']);
+          }
+        }
+      }
+    } else {
+      foreach ($pdo->query("SELECT name FROM designations") as $r) {
+        $designationByCode[$r['name']] = $r['name'];
+      }
     }
   }
-} catch(Exception $e){}
+} catch (Exception $e) {
+}
 // Detect employees columns for designation and build designation maps
-$empColsLower = [];$hasEmpDest=false;$hasEmpDesignationId=false;
-try { $empColsLower = array_map('strtolower',$pdo->query("DESCRIBE employees")->fetchAll(PDO::FETCH_COLUMN,0)); } catch(Exception $e){}
-if($empColsLower){ $hasEmpDest = in_array('destcode',$empColsLower,true); $hasEmpDesignationId = in_array('designation_id',$empColsLower,true); }
+$empColsLower = [];
+$hasEmpDest = false;
+$hasEmpDesignationId = false;
+try {
+  $empColsLower = array_map('strtolower', $pdo->query("DESCRIBE employees")->fetchAll(PDO::FETCH_COLUMN, 0));
+} catch (Exception $e) {
+}
+if ($empColsLower) {
+  $hasEmpDest = in_array('destcode', $empColsLower, true);
+  $hasEmpDesignationId = in_array('designation_id', $empColsLower, true);
+}
 // designation maps
-$designationById=[]; $designationByCode=[];
+$designationById = [];
+$designationByCode = [];
 // Prefer desigcode table (DesigCode/Code -> Description)
-try { $hasDesigCode=(bool)$pdo->query("SHOW TABLES LIKE 'desigcode'")->fetch(); if($hasDesigCode){
-  try { foreach($pdo->query("SELECT DesigCode AS code, Description FROM desigcode") as $r){ if($r['code']!==''){ $designationByCode[$r['code']] = $r['Description'] ?: $r['code']; } } }
-  catch(Throwable $e){ try { foreach($pdo->query("SELECT Code AS code, Description FROM desigcode") as $r){ if($r['code']!==''){ $designationByCode[$r['code']] = $r['Description'] ?: $r['code']; } } } catch(Throwable $e2){} }
-} } catch(Exception $e){}
-// designations table fallback (id/code -> description/name)
-try { $hasDesignations=(bool)$pdo->query("SHOW TABLES LIKE 'designations'")->fetch(); if($hasDesignations){
-  $dcols = $pdo->query('SHOW COLUMNS FROM designations')->fetchAll(PDO::FETCH_COLUMN,0);
-  $hasCodeCol = in_array('code',$dcols,true);
-  $hasDescCol = in_array('description',$dcols,true);
-  if($hasDescCol){ foreach($pdo->query("SELECT id, description FROM designations") as $r){ $designationById[(int)$r['id']] = (string)$r['description']; } }
-  else { foreach($pdo->query("SELECT id, name FROM designations") as $r){ $designationById[(int)$r['id']] = (string)$r['name']; } }
-  if($hasCodeCol){
-    if($hasDescCol){ foreach($pdo->query("SELECT code, description FROM designations") as $r){ if($r['code']!==''){ $designationByCode[$r['code']] = $r['description'] ?: ($designationByCode[$r['code']] ?? $r['code']); } } }
-    else { foreach($pdo->query("SELECT code, name FROM designations") as $r){ if($r['code']!==''){ $designationByCode[$r['code']] = $r['name'] ?: ($designationByCode[$r['code']] ?? $r['code']); } } }
-  } else {
-    foreach($pdo->query("SELECT name FROM designations") as $r){ $designationByCode[$r['name']] = $r['name']; }
+try {
+  $hasDesigCode = (bool)$pdo->query("SHOW TABLES LIKE 'desigcode'")->fetch();
+  if ($hasDesigCode) {
+    try {
+      foreach ($pdo->query("SELECT DesigCode AS code, Description FROM desigcode") as $r) {
+        if ($r['code'] !== '') {
+          $designationByCode[$r['code']] = $r['Description'] ?: $r['code'];
+        }
+      }
+    } catch (Throwable $e) {
+      try {
+        foreach ($pdo->query("SELECT Code AS code, Description FROM desigcode") as $r) {
+          if ($r['code'] !== '') {
+            $designationByCode[$r['code']] = $r['Description'] ?: $r['code'];
+          }
+        }
+      } catch (Throwable $e2) {
+      }
+    }
   }
-} } catch(Exception $e){}
+} catch (Exception $e) {
+}
+// designations table fallback (id/code -> description/name)
+try {
+  $hasDesignations = (bool)$pdo->query("SHOW TABLES LIKE 'designations'")->fetch();
+  if ($hasDesignations) {
+    $dcols = $pdo->query('SHOW COLUMNS FROM designations')->fetchAll(PDO::FETCH_COLUMN, 0);
+    $hasCodeCol = in_array('code', $dcols, true);
+    $hasDescCol = in_array('description', $dcols, true);
+    if ($hasDescCol) {
+      foreach ($pdo->query("SELECT id, description FROM designations") as $r) {
+        $designationById[(int)$r['id']] = (string)$r['description'];
+      }
+    } else {
+      foreach ($pdo->query("SELECT id, name FROM designations") as $r) {
+        $designationById[(int)$r['id']] = (string)$r['name'];
+      }
+    }
+    if ($hasCodeCol) {
+      if ($hasDescCol) {
+        foreach ($pdo->query("SELECT code, description FROM designations") as $r) {
+          if ($r['code'] !== '') {
+            $designationByCode[$r['code']] = $r['description'] ?: ($designationByCode[$r['code']] ?? $r['code']);
+          }
+        }
+      } else {
+        foreach ($pdo->query("SELECT code, name FROM designations") as $r) {
+          if ($r['code'] !== '') {
+            $designationByCode[$r['code']] = $r['name'] ?: ($designationByCode[$r['code']] ?? $r['code']);
+          }
+        }
+      }
+    } else {
+      foreach ($pdo->query("SELECT name FROM designations") as $r) {
+        $designationByCode[$r['name']] = $r['name'];
+      }
+    }
+  }
+} catch (Exception $e) {
+}
 
 // Load local employees (include DestCode/designation_id if exists)
 try {
   $extra = [];
-  if($hasEmpDest) $extra[]='DestCode';
-  if($hasEmpDesignationId) $extra[]='designation_id';
-  $sel = 'id, EmpNo, Name, DeptCode' . ($extra? ', '.implode(',', $extra):'');
+  if ($hasEmpDest) $extra[] = 'DestCode';
+  if ($hasEmpDesignationId) $extra[] = 'designation_id';
+  $sel = 'id, EmpNo, Name, DeptCode' . ($extra ? ', ' . implode(',', $extra) : '');
   $employeesLocal = $pdo->query("SELECT $sel FROM employees ORDER BY Name LIMIT 1500")->fetchAll(PDO::FETCH_ASSOC);
-} catch (Exception $e) {}
+} catch (Exception $e) {
+}
 
 // If employeemaster exists, build a quick lookup to fix misaligned imported data (cases where Name holds numeric string etc.)
 if ($fromMaster) {
@@ -241,11 +341,19 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && verify_csrf()) {
       break;
   }
 
+  // Generate stable registration number (monotonic) at create time
+  $regNo = null;
+  try {
+    $pdo->exec("INSERT INTO trip_registrations() VALUES()");
+    $regNo = (int)$pdo->lastInsertId();
+  } catch (Throwable $e) { $regNo = null; }
+
   // Insert minimal fields even if extended columns not yet added, by detecting columns
   $cols = $pdo->query("SHOW COLUMNS FROM trips")->fetchAll(PDO::FETCH_COLUMN, 0);
   $fieldMap = [
     // Use the selected employee (not the logged-in user) for FK integrity.
     'employee_id' => $selectedEmpId ?: $user['employee_id'] ?? $user['id'],
+    'reg_no' => $regNo,
     'employee_source' => $employeeSource,
     'emp_no' => $empRow['EmpNo'] ?? null,
     'emp_name' => $empRow['Name'] ?? null,
@@ -358,9 +466,12 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && verify_csrf()) {
                   <div class="col-md-2 col-sm-6">
                     <label class="form-label small text-muted mb-1">Position</label>
                     <?php
-                      $lockedDesigDesc='';
-                      if(!empty($lr['designation_id']) && isset($designationById[(int)$lr['designation_id']])){ $lockedDesigDesc = $designationById[(int)$lr['designation_id']]; }
-                      elseif(!empty($lr['DestCode']) && isset($designationByCode[$lr['DestCode']])){ $lockedDesigDesc = $designationByCode[$lr['DestCode']]; }
+                    $lockedDesigDesc = '';
+                    if (!empty($lr['designation_id']) && isset($designationById[(int)$lr['designation_id']])) {
+                      $lockedDesigDesc = $designationById[(int)$lr['designation_id']];
+                    } elseif (!empty($lr['DestCode']) && isset($designationByCode[$lr['DestCode']])) {
+                      $lockedDesigDesc = $designationByCode[$lr['DestCode']];
+                    }
                     ?>
                     <input class="form-control" value="<?= esc($lockedDesigDesc) ?>" readonly>
                   </div>
@@ -391,7 +502,12 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && verify_csrf()) {
                       <select name="employee_id" id="employeeSelect" class="form-select border-2" size="6" required style="border-radius: 8px; font-size: 0.9rem; background: #fafafa;">
                         <option value="" class="text-muted">-- Select an employee --</option>
                         <?php foreach ($employeesLocal as $e): ?>
-                          <?php $desigDescOpt=''; if(!empty($e['designation_id']) && isset($designationById[(int)$e['designation_id']])){ $desigDescOpt=$designationById[(int)$e['designation_id']]; } elseif(!empty($e['DestCode']) && isset($designationByCode[$e['DestCode']])) { $desigDescOpt=$designationByCode[$e['DestCode']]; } ?>
+                          <?php $desigDescOpt = '';
+                          if (!empty($e['designation_id']) && isset($designationById[(int)$e['designation_id']])) {
+                            $desigDescOpt = $designationById[(int)$e['designation_id']];
+                          } elseif (!empty($e['DestCode']) && isset($designationByCode[$e['DestCode']])) {
+                            $desigDescOpt = $designationByCode[$e['DestCode']];
+                          } ?>
                           <option data-source="local" data-empno="<?= esc($e['EmpNo']) ?>" data-name="<?= esc($e['Name']) ?>" data-dept="<?= esc($e['DeptCode']) ?>" data-desig-desc="<?= esc($desigDescOpt) ?>" value="<?= $e['id'] ?>" style="padding: 8px;">
                             <span class="fw-medium"><?= esc($e['EmpNo']) ?></span> • <?= esc($e['Name']) ?>
                           </option>
@@ -478,19 +594,19 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && verify_csrf()) {
                 <h6 class="text-muted text-uppercase small fw-semibold mb-3 border-bottom pb-2">Financial Details</h6>
                 <label class="form-label fw-medium mb-2">Temporary Payment Advance</label>
                 <div class="input-group input-group-lg">
-                  <select class="form-select border-2" name="currency" id="currencySel"
+                  <!-- <select class="form-select border-2" name="currency" id="currencySel"
                     style="max-width: 120px; border-radius: 8px 0 0 8px;">
                     <option value="IDR">IDR</option>
                     <option value="SGN">SGD</option>
                     <option value="YEN">JPY</option>
-                  </select>
+                  </select> -->
                   <input type="number" step="0.01" min="0" name="temporary_payment" id="tempPayment"
                     class="form-control border-2" required placeholder="0.00"
                     style="border-radius: 0 8px 8px 0;">
                 </div>
-                <div class="mt-2 p-2 bg-light rounded" id="convertedInfo" style="border-radius: 6px;">
+                <!-- <div class="mt-2 p-2 bg-light rounded" id="convertedInfo" style="border-radius: 6px;">
                   <small class="text-muted">Currency conversion will appear here</small>
-                </div>
+                </div> -->
               </div>
             </div>
 

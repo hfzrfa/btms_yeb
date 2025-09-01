@@ -10,11 +10,26 @@ $pdo = getPDO();
 try {
   $col = $pdo->query("SHOW COLUMNS FROM trip_approvals LIKE 'id'")->fetch(PDO::FETCH_ASSOC);
   if ($col && stripos(($col['Extra'] ?? ''), 'auto_increment') === false) {
-    try { $hasPk = $pdo->query("SHOW INDEX FROM trip_approvals WHERE Key_name='PRIMARY'")->fetch(); if(!$hasPk){ $pdo->exec("ALTER TABLE trip_approvals ADD PRIMARY KEY (id)"); } } catch(Throwable $e) {}
-    try { $pdo->exec("ALTER TABLE trip_approvals MODIFY id INT NOT NULL AUTO_INCREMENT"); } catch(Throwable $e) {}
-    try { $next = (int)$pdo->query("SELECT MAX(id)+1 FROM trip_approvals")->fetchColumn(); if($next<1) $next=1; $pdo->exec("ALTER TABLE trip_approvals AUTO_INCREMENT=".$next); } catch(Throwable $e) {}
+    try {
+      $hasPk = $pdo->query("SHOW INDEX FROM trip_approvals WHERE Key_name='PRIMARY'")->fetch();
+      if (!$hasPk) {
+        $pdo->exec("ALTER TABLE trip_approvals ADD PRIMARY KEY (id)");
+      }
+    } catch (Throwable $e) {
+    }
+    try {
+      $pdo->exec("ALTER TABLE trip_approvals MODIFY id INT NOT NULL AUTO_INCREMENT");
+    } catch (Throwable $e) {
+    }
+    try {
+      $next = (int)$pdo->query("SELECT MAX(id)+1 FROM trip_approvals")->fetchColumn();
+      if ($next < 1) $next = 1;
+      $pdo->exec("ALTER TABLE trip_approvals AUTO_INCREMENT=" . $next);
+    } catch (Throwable $e) {
+    }
   }
-} catch (Throwable $e) { /* ignore */ }
+} catch (Throwable $e) { /* ignore */
+}
 $id = (int)get('id');
 $stmt = $pdo->prepare('SELECT t.*, e.Name employee_name, e.EmpNo employee_empno FROM trips t LEFT JOIN employees e ON e.id=t.employee_id WHERE t.id=?');
 $stmt->execute([$id]);
@@ -56,6 +71,7 @@ $timeline = $timeline->fetchAll(PDO::FETCH_ASSOC);
 <div class="card mb-3">
   <div class="card-body">
     <div class="row g-2">
+      <?php if (isset($trip['reg_no'])): ?><div class="col-md-3"><strong>Reg No:</strong> <span class="badge bg-dark"><?= (int)$trip['reg_no'] ?></span></div><?php endif; ?>
       <div class="col-md-4"><strong>Employee:</strong> <?= esc($trip['employee_name'] ?? $trip['emp_name'] ?? 'Unknown') ?> (<?= esc($trip['employee_empno'] ?? $trip['emp_no'] ?? '') ?>)</div>
       <div class="col-md-4"><strong>Tujuan:</strong> <?= esc($trip['tujuan']) ?></div>
       <div class="col-md-4"><strong>Tanggal:</strong> <?= esc($trip['tanggal']) ?></div>

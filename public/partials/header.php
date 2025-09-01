@@ -49,11 +49,16 @@ $current = $page ?? ($_GET['page'] ?? 'dashboard');
             <a class="nav-link<?= ($current === 'trips/index') ? ' active' : '' ?>" href="index.php?page=trips/index">
               <i class="fas fa-clipboard-check"></i> Review & Approve
             </a>
+
+            <a class="nav-link<?= $current === 'settlements/index' ? ' active' : '' ?>" href="index.php?page=settlements/index">
+              <i class="fas fa-receipt"></i> Settlements
+            </a>
+            
+            <a class="nav-link<?= $current === 'admin/edit_approvals' ? ' active' : '' ?>" href="index.php?page=admin/edit_approvals">
+              <i class="fas fa-edit"></i> Edit Approvals
+            </a>
           <?php endif; ?>
 
-          <a class="nav-link<?= $current === 'settlements/index' ? ' active' : '' ?>" href="index.php?page=settlements/index">
-            <i class="fas fa-receipt"></i> Settlements
-          </a>
 
           <?php if ($user['role'] === 'admin'): ?>
             <div class="section-label">Administration</div>
@@ -66,12 +71,15 @@ $current = $page ?? ($_GET['page'] ?? 'dashboard');
             <a class="nav-link<?= $current === 'users/reset' ? ' active' : '' ?>" href="index.php?page=users/reset">
               <i class="fas fa-key"></i> Reset Password
             </a>
-            <a class="nav-link<?= $current === 'users/sync' ? ' active' : '' ?>" href="index.php?page=users/sync">
+            <!-- <a class="nav-link<?= $current === 'users/sync' ? ' active' : '' ?>" href="index.php?page=users/sync">
               <i class="fas fa-users-cog"></i> Sync Users
             </a>
             <a class="nav-link<?= $current === 'users/rebuild' ? ' active' : '' ?>" href="index.php?page=users/rebuild">
               <i class="fas fa-recycle"></i> Rebuild Users
-            </a>
+            </a> -->
+            <!-- <a class="nav-link<?= $current === 'admin/circural' ? ' active' : '' ?>" href="index.php?page=admin/circural">
+              <i class="fas fa-database"></i> Edit Circural
+            </a> -->
           <?php endif; ?>
         </nav>
         <div class="mt-auto btms-userbox">

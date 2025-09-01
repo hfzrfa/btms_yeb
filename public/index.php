@@ -33,11 +33,13 @@ $allowed = [
     'trips/pdf',
     'settlements/index',
     'settlements/create',
-    'settlements/pdf'
-    ,'users/sync'
-    ,'users/reset'
-    ,'users/rebuild'
-    ,'users/create'
+    'settlements/pdf',
+    'users/sync',
+    'users/reset',
+    'users/rebuild',
+    'users/create',
+    'admin/edit_approvals',
+    // 'admin/circural'
 ];
 
 // Role-based restrictions (pages each role MAY access besides login/signup)
@@ -105,7 +107,7 @@ if (in_array($page, ['login', 'signup'], true)) {
         }
 
         // Raw pages that must NOT include the global layout (so they can send their own headers / printable docs)
-    $rawPages = ['trips/pdf', 'settlements/pdf', 'employees/suggest'];
+        $rawPages = ['trips/pdf', 'settlements/pdf', 'employees/suggest'];
         if (in_array($page, $rawPages, true)) {
             $target = __DIR__ . '/pages/' . $page . '.php';
             if (is_file($target)) {

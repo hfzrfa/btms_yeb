@@ -48,7 +48,7 @@ if ($user['role'] === 'employee' && $trip['employee_id'] != $user['employee_id']
             <a href="index.php?page=trips/index" class="btn btn-secondary btn-modern">
                 <i class="fas fa-arrow-left me-2"></i>Back to List
             </a>
-            <?php if($trip['status'] === 'approved'): ?>
+            <?php if ($trip['status'] === 'approved'): ?>
                 <a href="index.php?page=trips/pdf&id=<?= $trip['id'] ?>" class="btn btn-primary btn-modern" target="_blank">
                     <i class="fas fa-file-pdf me-2"></i>Download PDF
                 </a>
@@ -75,17 +75,17 @@ if ($user['role'] === 'employee' && $trip['employee_id'] != $user['employee_id']
                             <label class="form-label small fw-semibold text-muted">Name</label>
                             <div class="fw-semibold"><?= esc($trip['employee_name']) ?></div>
                         </div>
-                        <?php if($trip['DeptCode']): ?>
-                        <div class="col-6">
-                            <label class="form-label small fw-semibold text-muted">Department</label>
-                            <div><span class="badge badge-modern bg-light text-dark"><?= esc($trip['DeptCode']) ?></span></div>
-                        </div>
+                        <?php if ($trip['DeptCode']): ?>
+                            <div class="col-6">
+                                <label class="form-label small fw-semibold text-muted">Department</label>
+                                <div><span class="badge badge-modern bg-light text-dark"><?= esc($trip['DeptCode']) ?></span></div>
+                            </div>
                         <?php endif; ?>
-                        <?php if($trip['ClasCode']): ?>
-                        <div class="col-6">
-                            <label class="form-label small fw-semibold text-muted">Classification</label>
-                            <div><span class="badge badge-modern bg-light text-dark"><?= esc($trip['ClasCode']) ?></span></div>
-                        </div>
+                        <?php if ($trip['ClasCode']): ?>
+                            <div class="col-6">
+                                <label class="form-label small fw-semibold text-muted">Classification</label>
+                                <div><span class="badge badge-modern bg-light text-dark"><?= esc($trip['ClasCode']) ?></span></div>
+                            </div>
                         <?php endif; ?>
                     </div>
                 </div>
@@ -110,12 +110,12 @@ if ($user['role'] === 'employee' && $trip['employee_id'] != $user['employee_id']
                             <label class="form-label small fw-semibold text-muted">Status</label>
                             <div>
                                 <?php
-                                $statusClass = match($trip['status']) {
+                                $statusClass = match ($trip['status']) {
                                     'approved' => 'status-active',
-                                    'pending' => 'status-pending', 
+                                    'pending' => 'status-pending',
                                     default => 'status-inactive'
                                 };
-                                $badgeClass = match($trip['status']) {
+                                $badgeClass = match ($trip['status']) {
                                     'approved' => 'bg-success',
                                     'pending' => 'bg-warning',
                                     'rejected' => 'bg-danger',
@@ -153,45 +153,45 @@ if ($user['role'] === 'employee' && $trip['employee_id'] != $user['employee_id']
                             <label class="form-label small fw-semibold text-muted">Destination</label>
                             <div class="fw-semibold"><?= esc($trip['tujuan']) ?></div>
                         </div>
-                        
-                        <?php if(!empty($trip['destination_district'])): ?>
-                        <div class="col-lg-6">
-                            <label class="form-label small fw-semibold text-muted">District</label>
-                            <div><?= esc($trip['destination_district']) ?></div>
-                        </div>
+
+                        <?php if (!empty($trip['destination_district'])): ?>
+                            <div class="col-lg-6">
+                                <label class="form-label small fw-semibold text-muted">District</label>
+                                <div><?= esc($trip['destination_district']) ?></div>
+                            </div>
                         <?php endif; ?>
-                        
-                        <?php if(!empty($trip['destination_company'])): ?>
-                        <div class="col-lg-6">
-                            <label class="form-label small fw-semibold text-muted">Company</label>
-                            <div><?= esc($trip['destination_company']) ?></div>
-                        </div>
+
+                        <?php if (!empty($trip['destination_company'])): ?>
+                            <div class="col-lg-6">
+                                <label class="form-label small fw-semibold text-muted">Company</label>
+                                <div><?= esc($trip['destination_company']) ?></div>
+                            </div>
                         <?php endif; ?>
-                        
-                        <?php if(!empty($trip['period_from']) && !empty($trip['period_to'])): ?>
-                        <div class="col-lg-6">
-                            <label class="form-label small fw-semibold text-muted">Period</label>
-                            <div><?= date('d M Y', strtotime($trip['period_from'])) ?> - <?= date('d M Y', strtotime($trip['period_to'])) ?></div>
-                        </div>
+
+                        <?php if (!empty($trip['period_from']) && !empty($trip['period_to'])): ?>
+                            <div class="col-lg-6">
+                                <label class="form-label small fw-semibold text-muted">Period</label>
+                                <div><?= date('d M Y', strtotime($trip['period_from'])) ?> - <?= date('d M Y', strtotime($trip['period_to'])) ?></div>
+                            </div>
                         <?php endif; ?>
-                        
+
                         <div class="col-lg-6">
                             <label class="form-label small fw-semibold text-muted">Estimated Cost</label>
                             <div class="fw-semibold text-primary">IDR <?= number_format($trip['biaya_estimasi'], 0, ',', '.') ?></div>
                         </div>
-                        
-                        <?php if(!empty($trip['temp_payment_idr'])): ?>
-                        <div class="col-lg-6">
-                            <label class="form-label small fw-semibold text-muted">Advance Payment</label>
-                            <div class="fw-semibold text-success">IDR <?= number_format($trip['temp_payment_idr'], 0, ',', '.') ?></div>
-                        </div>
+
+                        <?php if (!empty($trip['temp_payment_idr'])): ?>
+                            <div class="col-lg-6">
+                                <label class="form-label small fw-semibold text-muted">Advance Payment</label>
+                                <div class="fw-semibold text-success">IDR <?= number_format($trip['temp_payment_idr'], 0, ',', '.') ?></div>
+                            </div>
                         <?php endif; ?>
-                        
-                        <?php if(!empty($trip['purpose'])): ?>
-                        <div class="col-12">
-                            <label class="form-label small fw-semibold text-muted">Purpose</label>
-                            <div class="p-3 bg-light rounded"><?= esc($trip['purpose']) ?></div>
-                        </div>
+
+                        <?php if (!empty($trip['purpose'])): ?>
+                            <div class="col-12">
+                                <label class="form-label small fw-semibold text-muted">Purpose</label>
+                                <div class="p-3 bg-light rounded"><?= esc($trip['purpose']) ?></div>
+                            </div>
                         <?php endif; ?>
                     </div>
                 </div>
