@@ -132,9 +132,9 @@ rate\_yen = temp\_payment\_idr / temp\_payment\_yen
 
 ## Attachments
 
-https://github.com/hfzrfa/btms_yeb/blob/main/public/assets/Screenshot%202025-09-02%20184415.png?raw=true
-github.com/hfzrfa/btms_yeb/blob/main/public/assets/Screenshot%202025-09-02%20184519.png?raw=true
-https://github.com/hfzrfa/btms_yeb/blob/main/public/assets/Screenshot%202025-09-02%20184529.png
+pubic/assets/1.png
+pubic/assets/2.png
+pubic/assets/3.png
 
 
 
