@@ -31,8 +31,14 @@ try {
 $user = current_user();
 
 // Ensure trips.reg_no exists and a simple sequence table for stable registration numbers
-try { $pdo->exec("ALTER TABLE trips ADD COLUMN reg_no INT NULL"); } catch (Throwable $e) {}
-try { $pdo->exec("CREATE TABLE IF NOT EXISTS trip_registrations (id INT NOT NULL AUTO_INCREMENT PRIMARY KEY, created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP)"); } catch (Throwable $e) {}
+try {
+  $pdo->exec("ALTER TABLE trips ADD COLUMN reg_no INT NULL");
+} catch (Throwable $e) {
+}
+try {
+  $pdo->exec("CREATE TABLE IF NOT EXISTS trip_registrations (id INT NOT NULL AUTO_INCREMENT PRIMARY KEY, created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP)");
+} catch (Throwable $e) {
+}
 
 // Unified dropdown (searchable) always includes LOCAL employees from employees table.
 // Japan employees pulled from japanemployees (preferred) or employees_japan if available.
@@ -346,7 +352,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && verify_csrf()) {
   try {
     $pdo->exec("INSERT INTO trip_registrations() VALUES()");
     $regNo = (int)$pdo->lastInsertId();
-  } catch (Throwable $e) { $regNo = null; }
+  } catch (Throwable $e) {
+    $regNo = null;
+  }
 
   // Insert minimal fields even if extended columns not yet added, by detecting columns
   $cols = $pdo->query("SHOW COLUMNS FROM trips")->fetchAll(PDO::FETCH_COLUMN, 0);

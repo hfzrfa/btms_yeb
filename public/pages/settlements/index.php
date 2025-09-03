@@ -18,24 +18,49 @@ if ($user['role'] === 'employee') {
 ?>
 <style>
   /* Ensure page and modal can scroll on smaller viewports */
-  html, body { height: auto; }
-  .modal-dialog.modal-dialog-scrollable .modal-content { max-height: 92vh; }
+  html,
+  body {
+    height: auto;
+  }
+
+  .modal-dialog.modal-dialog-scrollable .modal-content {
+    max-height: 92vh;
+  }
+
   /* Ensure vertical scroll within the modal body */
   .modal-dialog.modal-dialog-scrollable .modal-body {
     overflow-y: auto;
-    max-height: calc(100vh - 160px); /* header+footer approx */
+    max-height: calc(100vh - 160px);
+    /* header+footer approx */
   }
+
   /* Wider but fluid modal width and viewport fit */
   @media (max-width: 1366px) {
-    .modal-dialog { max-width: 96vw; margin: 0.5rem auto; }
+    .modal-dialog {
+      max-width: 96vw;
+      margin: 0.5rem auto;
+    }
   }
+
   @media (max-height: 700px) {
-  .modal-dialog.modal-dialog-scrollable .modal-content { max-height: 88vh; }
-  .modal-dialog.modal-dialog-scrollable .modal-body { max-height: calc(100vh - 140px); }
+    .modal-dialog.modal-dialog-scrollable .modal-content {
+      max-height: 88vh;
+    }
+
+    .modal-dialog.modal-dialog-scrollable .modal-body {
+      max-height: calc(100vh - 140px);
+    }
   }
+
   /* Prevent table container from growing off-screen if extremely tall */
-  .btms-content { overflow: auto; }
-  #settleTable { width: 100%; }
+  .btms-content {
+    overflow: auto;
+  }
+
+  #settleTable {
+    width: 100%;
+  }
+
   /* Footer stays outside the scrollable body per Bootstrap; no sticky needed */
 </style>
 <div class="d-flex flex-wrap gap-2 justify-content-between align-items-center mb-3">
@@ -65,9 +90,9 @@ if ($user['role'] === 'employee') {
       </tr>
     </thead>
     <tbody>
-    <?php foreach ($trips as $t): $settled = !empty($t['settlement_id']); ?>
+      <?php foreach ($trips as $t): $settled = !empty($t['settlement_id']); ?>
         <tr>
-      <td><?= (int)($t['reg_no'] ?? 0) ?></td>
+          <td><?= (int)($t['reg_no'] ?? 0) ?></td>
           <?php if ($user['role'] !== 'employee'): ?><td><?= esc($t['emp_no']) ?></td>
             <td><?= esc($t['employee_name']) ?></td><?php endif; ?>
           <td><?= esc($t['tujuan']) ?></td>
@@ -107,6 +132,7 @@ if ($user['role'] === 'employee') {
                                                                 ]) ?>' onclick="openSettlement(this)"><i class="fas fa-plus-circle"></i></button>
             <?php else: ?>
               <a class="btn btn-sm btn-outline-secondary" target="_blank" href="index.php?page=settlements/pdf&id=<?= $t['settlement_id'] ?>" title="Print PDF"><i class="fas fa-file-pdf"></i></a>
+              <!-- <a class="btn btn-sm btn-outline-success" href="index.php?page=settlements/export_excel&id=<?= $t['settlement_id'] ?>" title="Export to Excel"><i class="fas fa-file-excel"></i></a> -->
             <?php endif; ?>
           </td>
         </tr>

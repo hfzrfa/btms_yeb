@@ -182,7 +182,10 @@ if (!empty($settle['total_realisasi'])) {
 $returnToAcc   = $advance > $totalIdr ? ($advance - $totalIdr) : 0;
 $payToEmployee = $totalIdr; // mengikuti formulir (nilai total diulang di kotak "Pay to Employee")
 
-header('Content-Type: text/html; charset=utf-8');
+$filename = 'settlement-' . (int)$id . '.xls';
+header('Content-Type: application/vnd.ms-excel');
+header('Content-Disposition: attachment; filename="' . $filename . '"');
+echo "\xEF\xBB\xBF"; // UTF-8 BOM for Excel
 ?>
 <!doctype html>
 <html>
@@ -527,7 +530,7 @@ header('Content-Type: text/html; charset=utf-8');
                     <td></td>
                     <td></td>
                     <td></td>
-                <?php else: ?>
+            <?php else: ?>
                 <tr class="expense-row">
                     <td><?= $cat === 'Accommodation' ? 'Accomodation' : $cat ?></td>
                     <td></td>
@@ -540,7 +543,7 @@ header('Content-Type: text/html; charset=utf-8');
             <?php if ($cat === 'Bus'): ?>
                 <tr class="taxi-note shade">
                     <td colspan="5" style="padding-left:6px;">
-                        Taxi routes must be written down. If there are many routes, make them on a separate sheet and attach them.
+                        Taxi must write in the day, route fare for taxi ride. If there are too many, write in separate sheet and attach it
                     </td>
                 </tr>
             <?php endif; ?>

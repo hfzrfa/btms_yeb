@@ -9,9 +9,9 @@
   --btms-border: #d9e4f2;
   --btms-text-dark: #0f2747;
   --btms-text-muted: #5c6f84;
-  --btms-danger: #e53935;
-  --btms-success: #2e7d32;
-  --btms-warning: #ffb300;
+  --btms-danger: #fe3d70;
+  --btms-success: #00dd91;
+  --btms-warning: #feb65d;
   --btms-radius-sm: 0.4rem;
   --btms-radius: 0.6rem;
 }

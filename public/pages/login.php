@@ -26,12 +26,12 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 ?>
 <div class="row justify-content-center">
   <div class="col-md-5 col-lg-4">
-    <div class="card border-0 shadow-lg mt-5">
-      <div class="card-header bg-primary border-0 py-4">
+    <div class="card border-5 shadow-lg mt-5">
+      <div class="card-header bg-primary border-0 py-4 ">
         <div class="text-center">
           <div class="mb-3">
             <div class="d-flex justify-content-center">
-              <div class="bg-white rounded-circle p-3 shadow-sm" style="width: 80px; height: 80px; display: flex; align-items: center; justify-content: center;">
+              <div class="bg-white rounded-circle p-3 shadow-xl" style="width: 80px; height: 80px; display: flex; align-items: center; justify-content: center;">
                 <div class="text-primary fw-bold" style="font-size: 24px; font-family: Arial, sans-serif;">
                   YEB
                 </div>
