@@ -132,9 +132,10 @@ rate\_yen = temp\_payment\_idr / temp\_payment\_yen
 
 ## Attachments
 
-  ![Web View](pubic/assets/1.png)
-    ![Web View](pubic/assets/2.png)
-      ![Web View](pubic/assets/3.png)
+  ![Web View](public/assets/1.png)
+    ![Web View](public/assets/2.png)
+      ![Web View](public/assets/3.png)
+
 
 
 
