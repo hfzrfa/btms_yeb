@@ -130,4 +130,11 @@ rate\_yen = temp\_payment\_idr / temp\_payment\_yen
 - Add new pages by registering them in the router whitelist to enforce RBAC.
 - If switching back to detailed settlement line items, restore the previous modal/table logic and populate `settlement_items`.
 
+## Attachments
+
+https://github.com/hfzrfa/btms_yeb/blob/main/public/assets/Screenshot%202025-09-02%20184415.png?raw=true
+github.com/hfzrfa/btms_yeb/blob/main/public/assets/Screenshot%202025-09-02%20184519.png?raw=true
+https://github.com/hfzrfa/btms_yeb/blob/main/public/assets/Screenshot%202025-09-02%20184529.png
+
+
 
